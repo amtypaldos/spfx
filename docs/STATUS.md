@@ -2,7 +2,25 @@
 
 Evidence key: **[HW]** observed on the owner's SP-1 (owner-run; see the hardware log). **[HOST]** verified by automated tests on a development Mac. **[SRC]** from upstream source/docs or our own build output. **[UNTESTED]** built but never run. **[TODO]** not started. The integrated image v1-rc1 has **not** been run on an SP-1.
 
-## v1-rc5 (2026-11-24) -- NOT RUN ON HARDWARE
+## v1-rc6 (2026-11-24) -- NOT RUN ON HARDWARE
+
+`sp1fx-v1-rc6.bin`, SHA-256 `daabe9b3961c0b30d38230891b71ae7db819ff83cb3924093f0fa181b2a51597`,
+153,592 B, check PASS, reproducible, 0 warnings; host suites pass, companion 56/56.
+rc5 on hardware [HW, owner]: everything worked, including the charge standby pulse/steady display.
+rc6 = rc5 plus:
+- Battery fuel gauge in the charge standby: 1-8 LEDs, top one pulsing while charging, steady
+  when done.
+- No charging LED while running (rc3-rc5's PLAY-LED-4 blip removed).
+- Battery % in the console and in the companion: METERS trailing byte; older companions reject
+  it, the companion in this commit accepts it with or without.
+- Conversion is CALCULATED/UNCALIBRATED [HOST tests]:
+  - divider 2.0, assumed from Tape Looper's 2380 = 4.21 V anchor;
+  - Li-ion table 3.30-4.20 V;
+  - -0.1 V and a 95 % cap while charging;
+  - ~2 s smoothing, 3 % hysteresis, 2 s updates;
+  - load sag not corrected.
+
+## v1-rc5 (2026-11-24) -- superseded by rc6 (worked on hardware)
 
 `sp1fx-v1-rc5.bin`, SHA-256 `bfaa973eb2369d935b79d19ca02750296f270988166d5e83c4052dc3954810db`,
 152,584 B, check PASS, reproducible, 0 warnings; host suites pass, companion 56/56.
@@ -321,6 +339,7 @@ Next: owner runs fxprof -> replace the declared values with measured ones.
 - Minimal image: when USB is plugged in, FN-hold enters SYSTEM_OFF and the device may stay dark until FN is pressed or USB is replugged (Tape Looper soft-resets instead). Pins, PWM ownership of the LED pin, and watchdog-channel assumptions are unverified guesses from Tape Looper's source.
 
 ## Hardware log (owner-reported; no automated evidence)
+- 2026-11-24 (owner-run): `sp1fx-v1-rc5.bin`: everything works incl. the charge standby display -> rc6 adds the fuel gauge.
 - 2026-11-24 (owner-run, console read live by the lead): `sp1fx-v1-rc3.bin`: controls fixed (scanner works), power on/off and presets fine, no resets; control-loop starvation near-misses at ~99 % CPU -> rc4.
 - 2026-11-24 (owner-run, console read live by the lead): `sp1fx-v1-rc2.bin` runs steadily (stalls=0, no crash); FN-hold power off (1.5 s) fired by accident while cycling presets; controls dead in some boots after a SAADC scan timeout; overload guard shed and stayed latched -> rc3.
 - 2026-11-24 (owner-run, console read by the lead): `sp1fx-v1-rc1.bin` resets by watchdog every ~6-20 s (see "v1-rc2" at the top). Superseded by rc2 (not yet run).

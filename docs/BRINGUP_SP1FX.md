@@ -1,4 +1,38 @@
-# SP-1 FX v1: integrated firmware bring-up (rc5 current)
+# SP-1 FX v1: integrated firmware bring-up (rc6 current)
+
+## rc6 (2026-11-24) = rc5 + battery fuel gauge -- NOT RUN ON HARDWARE
+
+| | |
+|---|---|
+| File | `~/spfx/flash-ready/sp1fx-v1-rc6.bin` (ELF: `sp1fx-v1-rc6.elf`) |
+| SHA-256 | `daabe9b3961c0b30d38230891b71ae7db819ff83cb3924093f0fa181b2a51597` (in `SHA256SUMS`) |
+| Size | 153,592 B at 0x20000, `check_image.py` PASS, two clean builds identical; companion from the same commit |
+
+- **Off + USB plugged in (charge standby): fuel gauge.** 1 to 8 LEDs (the four PLAY-side LEDs,
+  then T1..T4) = battery level in eighths (at least one LED); the top lit LED pulses slowly while
+  charging; all steady when the charger reports done (then 8 LEDs = 100 %). The level updates at
+  most every 2 s and only moves by 3 % or more, so the bar does not flicker.
+- **While the unit is on: no charging indication on any LED** (owner). Battery % is in the
+  console (`D ... batt=NN%`, `store ... batt=NN% (mV smoothed, uncalibrated)`) and in the
+  companion next to the firmware version ("battery ~NN %").
+- **How the number is made (CALCULATED, UNCALIBRATED):** SAADC AIN4 (P0.28), gain 1/6, 0.6 V
+  internal reference, 12-bit: V_pin = raw x 3.6 V / 4096; battery = V_pin x 2.0. The ratio 2.0
+  is the one assumed constant (`BATT_DIVIDER_X1000`), derived from Tape Looper's anchor
+  "raw ~2380 = ~4.21 V at rest" (2380 x 3.6 / 4096 = 2.09 V -> 2.01). The owner's raw 2244 while
+  charging = 3.94 V. Percent from a Li-ion resting-voltage table (3.30 V = 0 %, 3.80 V = 50 %,
+  4.20 V = 100 %). While charging the voltage reads high, so 0.1 V is subtracted and the level is
+  capped at 95 % until the charger reports done. Running with audio the voltage sags a little
+  under load: smoothed (~2 s), not corrected. Host-tested: conversion, table, hysteresis,
+  charging cap, LED bar.
+- Protocol: METERS gets a trailing `batt_pct u8` (0..100, 255 unknown); older companions
+  reject the extra byte, the companion in this commit accepts it with or without.
+- rc6 test: unit off, plug USB: the bar appears (count the LEDs; top one pulsing). Report the
+  count and, after switching on, the `batt=` value and `batt_raw=` (with and without USB, and
+  ideally once nearly empty) so the constant can be calibrated.
+
+---
+
+# rc5 (superseded by rc6)
 
 ## rc5 (2026-11-24) = rc4 + safer jack levels + feedback saturation -- NOT RUN ON HARDWARE
 
@@ -159,8 +193,9 @@ controls ever die again, copy those lines.
 - **Never blocked:** watchdog or crash recovery, a power-on/battery/fresh-flash start with no
   wake reason, a reset-pin or other soft reset start at once. (After a flash the bootloader's
   reset reason decides; if it lands in the charge display, hold FUNCTION 4 s.)
-- **While running and charging:** the 4th PLAY-side LED blips dimly every 4 s when nothing else
-  uses it. `info` line: `vbus= pgood= charging= boot=`; companion: "USB power"/"charging".
+- **While running and charging:** (rc3-rc5: a dim blip on PLAY LED 4; **removed in rc6**, no LED
+  shows charging while the unit is on). `info` line: `vbus= pgood= charging= boot=`; companion:
+  "USB power"/"charging".
 
 ### 3. Charging (BQ24232) -- what the hardware offers (source findings, nothing verified)
 - `/CE` P0.21 (drive low = charging enabled), `/CHG` P0.22 (low = charging), `/PGOOD` P0.24 (low
