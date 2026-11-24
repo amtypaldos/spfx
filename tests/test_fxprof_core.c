@@ -103,31 +103,60 @@ static void setup_three(void)
 	engine_overload_feed(&eng, 0, 100);
 }
 
+/* feed n blocks of `cycles`; returns how many calls acted */
+static int feed_n(uint32_t n, uint32_t cycles, uint32_t lim)
+{
+	int acted = 0;
+	for (uint32_t j = 0; j < n; j++) acted += engine_overload_feed(&eng, cycles, lim);
+	return acted;
+}
+
 static void test_overload_guard(void)
 {
 	const uint32_t LIM = 72533u;
 	setup_three();
-	CHECK(eng.overload_n == ENGINE_OVERLOAD_BLOCKS);
-	/* short spikes never act */
-	for (int k = 0; k < 50; k++) {
-		for (uint32_t j = 0; j + 1 < eng.overload_n; j++) CHECK(engine_overload_feed(&eng, LIM + 1, LIM) == 0);
-		CHECK(engine_overload_feed(&eng, LIM, LIM) == 0); /* at the limit is not over */
+	CHECK(eng.overload_n == ENGINE_OVERLOAD_WINDOWS && eng.overload_win == ENGINE_OVERLOAD_WIN_BLOCKS);
+	const uint32_t W = eng.overload_win, N = eng.overload_n;
+	/* the hardware case (Ambient, usbaudio v3): ~49 % average with blocks spiking to ~89 %
+	 * (above the 85 % limit), even several in a row: never acts, for a long time */
+	const uint32_t avg = LIM * 49u / 85u, spike = LIM * 89u / 85u;
+	for (int k = 0; k < 20000; k++) {
+		uint32_t c = (k % 7 == 0 || (k % 500) < 8) ? spike : avg;
+		CHECK(engine_overload_feed(&eng, c, LIM) == 0);
 	}
 	CHECK(eng.diag.shed_mask == 0 && eng.diag.overload_sheds == 0);
-	/* sustained: the most expensive declared slot (reverb, slot 1) goes first */
-	int acted = 0;
-	for (uint32_t j = 0; j < eng.overload_n; j++) acted += engine_overload_feed(&eng, LIM * 2, LIM);
-	CHECK(acted == 1);
+	CHECK(eng.diag.overload_blocks > 0);          /* the spikes were seen ... */
+	CHECK(eng.diag.overload_windows == 0);        /* ... but no window mean was over */
+	CHECK(eng.diag.ovl_max_mean < LIM);
+	/* 8 consecutive blocks at 2x the limit, the rest calm: never acts (the old rule shed here) */
+	for (int k = 0; k < 50; k++) {
+		CHECK(feed_n(8, LIM * 2u, LIM) == 0);
+		CHECK(feed_n(W * 2u - 8u, avg, LIM) == 0);
+	}
+	CHECK(eng.diag.shed_mask == 0);
+	/* at the limit is not over */
+	CHECK(feed_n(W * N * 4u, LIM, LIM) == 0);
+	/* N-1 over windows then one calm window: the run restarts */
+	CHECK(feed_n(W * (N - 1u), LIM + LIM / 10u, LIM) == 0);
+	CHECK(feed_n(W, avg, LIM) == 0);
+	CHECK(feed_n(W * (N - 1u), LIM + LIM / 10u, LIM) == 0);
+	CHECK(eng.diag.shed_mask == 0);
+	feed_n(W, avg, LIM);
+	/* sustained mild overload (110 %): acts exactly at the end of the N-th window (~128 ms) */
+	CHECK(feed_n(W * N - 1u, LIM + LIM / 10u, LIM) == 0);
+	CHECK(engine_overload_feed(&eng, LIM + LIM / 10u, LIM) == 1);
+	/* the most expensive declared slot (reverb, slot 1) goes first */
 	CHECK_MSG(eng.diag.shed_mask == 2u, "shed mask %x", eng.diag.shed_mask);
 	run_blocks(1, 0.3f); /* fade-out chunk */
 	CHECK(eng.shed[1] == 2 && eng.active[1] == 1);
 	run_blocks(1, 0.3f);
 	CHECK(eng.active[1] == 0); /* stopped and reset, no tail */
-	/* then the next most expensive, then the last, then forced global bypass */
+	/* safety net: a window whose mean is over 9/8 of the limit acts after ONE window */
 	uint32_t order[3] = {0, 0, 0};
 	for (int step = 0; step < 3; step++) {
 		uint8_t before = eng.diag.shed_mask;
-		for (uint32_t j = 0; j < eng.overload_n; j++) engine_overload_feed(&eng, LIM * 2, LIM);
+		CHECK(feed_n(W - 1u, LIM * 2u, LIM) == 0);
+		CHECK(engine_overload_feed(&eng, LIM * 2u, LIM) == 1);
 		run_blocks(2, 0.3f);
 		order[step] = eng.diag.shed_mask & ~before;
 	}
@@ -145,22 +174,27 @@ static void test_overload_guard(void)
 		engine_process(&eng, a, c, a, c, 64);
 		if (b == 199) CHECK_NEAR(a[63] / c[63], -1.0, 1e-4);
 	}
-	/* clear: control request taken at the next chunk */
+	/* clear: control request taken at the next chunk; the partial window is dropped too */
+	feed_n(W / 2u, LIM * 2u, LIM);
 	engine_overload_clear(&eng);
 	run_blocks(1, 0.3f);
-	CHECK(eng.diag.shed_mask == 0 && eng.diag.forced_bypass == 0);
+	CHECK(eng.diag.shed_mask == 0 && eng.diag.forced_bypass == 0 && eng.ov_cnt == 0);
 	run_blocks(3, 0.3f);
 	CHECK(eng.active[0] && eng.active[1] && eng.active[2]);
-	/* blocks that initialised an effect never count */
+	/* blocks that initialised an effect never count (neither in the sum nor the window) */
 	engine_assign(&eng, 3, FX_DELAY);
-	for (int k = 0; k < 20; k++) {
+	uint32_t cnt0 = eng.ov_cnt;
+	run_blocks(1, 0.1f);
+	engine_overload_feed(&eng, 0xFFFFFFFFu, LIM);
+	CHECK(eng.ov_cnt == cnt0 && eng.diag.shed_mask == 0);
+	for (int k = 0; k < 200; k++) {
 		run_blocks(1, 0.1f);
-		engine_overload_feed(&eng, k == 0 ? LIM * 10 : 0, LIM);
+		engine_overload_feed(&eng, 0, LIM);
 	}
 	CHECK(eng.diag.shed_mask == 0);
 	/* a new effect in a shed slot starts unshed */
 	setup_three();
-	for (uint32_t j = 0; j < eng.overload_n; j++) engine_overload_feed(&eng, LIM * 2, LIM);
+	feed_n(W, LIM * 2u, LIM);
 	CHECK(eng.diag.shed_mask == 2u);
 	engine_assign(&eng, 1, FX_CHORUS);
 	run_blocks(2, 0.3f);
@@ -168,7 +202,7 @@ static void test_overload_guard(void)
 	/* disabled guard */
 	setup_three();
 	eng.overload_n = 0;
-	for (int j = 0; j < 100; j++) CHECK(engine_overload_feed(&eng, LIM * 3, LIM) == 0);
+	for (int j = 0; j < 1000; j++) CHECK(engine_overload_feed(&eng, LIM * 3, LIM) == 0);
 	CHECK(eng.diag.shed_mask == 0);
 }
 
@@ -186,7 +220,7 @@ static void test_overload_fade_no_click(void)
 	float maxstep = 0;
 	for (int b = 0; b < 400; b++) {
 		for (int i = 0; i < 64; i++) l[i] = r[i] = 0.5f;
-		if (b == 300) for (uint32_t j = 0; j < eng.overload_n; j++) engine_overload_feed(&eng, 1u << 30, 1000);
+		if (b == 300) for (uint32_t j = 0; j < eng.overload_win; j++) engine_overload_feed(&eng, 1u << 30, 1000);
 		engine_process(&eng, l, r, l, r, 64);
 		engine_overload_feed(&eng, 0, 1000); /* as the firmware: once per block */
 		for (int i = 0; i < 64; i++) {

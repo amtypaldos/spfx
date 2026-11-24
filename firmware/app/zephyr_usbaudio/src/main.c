@@ -99,8 +99,9 @@
 #define STARVE_IDLE_CYC  (CPU_HZ / 20000u)   /* 50 us */
 #define STARVE_RUN       32
 /* Overload guard (dsp/engine.h engine_overload_feed): whole-block work above 85 % of the
- * 64-frame period (64 / 48 kHz = 85,333 cycles at 64 MHz) for ENGINE_OVERLOAD_BLOCKS blocks
- * in a row -> the engine switches off the most expensive slot (then global bypass). */
+ * 64-frame period (64 / 48 kHz = 85,333 cycles at 64 MHz), judged as dsp/engine.h describes
+ * (since v1-rc1: mean over 32-block windows; the v3 image used 8 blocks in a row) -> the
+ * engine switches off the most expensive slot (then global bypass). */
 #define OVERLOAD_LIMIT_CYC ((uint32_t)((uint64_t)BLK_FRAMES * CPU_HZ / FS_HZ * 85u / 100u))
 
 #if CONFIG_SP1FX_USB_AUDIO_IN_STREAM

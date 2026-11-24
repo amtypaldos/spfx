@@ -3,6 +3,9 @@
 #include <math.h>
 #include <string.h>
 
+/* post() copies the config with fx_copy32 (whole words) */
+typedef char engine_cfg_is_words[(sizeof(engine_config_t) % 4u) == 0u ? 1 : -1];
+
 /* ------------------------------------------------------------------ config */
 
 void engine_config_default(engine_config_t *c)
@@ -88,7 +91,8 @@ void engine_init(engine_t *e, void *pool, uint32_t pool_bytes, float sr, uint32_
 	e->master_cur = 0.0f; /* fade up from silence on start */
 	e->ig_db_cached = -1000.0f; /* never a valid setting: forces the first computation */
 	e->mg_cached = -1.0f;
-	e->overload_n = ENGINE_OVERLOAD_BLOCKS;
+	e->overload_n = ENGINE_OVERLOAD_WINDOWS;
+	e->overload_win = ENGINE_OVERLOAD_WIN_BLOCKS;
 }
 
 static uint32_t fx_cycles(int fx_id)
@@ -147,7 +151,8 @@ static void post(engine_t *e)
 	e->box_seq = n + 1;
 	ENGINE_BARRIER();
 	HOOK(e, ENGINE_HOOK_POST_BEGIN);
-	b->cfg = e->cfg;
+	/* word copy: the firmware's libc memcpy (used for struct assignment) is byte-wise */
+	fx_copy32(&b->cfg, &e->cfg, sizeof b->cfg / 4u);
 	HOOK(e, ENGINE_HOOK_POST_MID);
 	for (int s = 0; s < ENGINE_SLOTS; s++) {
 		b->blk_off[s] = e->blk_off[s];
@@ -428,6 +433,8 @@ static void apply_pending(engine_t *e, int unlimited)
 		for (int s = 0; s < ENGINE_SLOTS; s++) e->shed[s] = 0;
 		e->forced_bypass = 0;
 		e->over_run = 0;
+		e->ov_sum = 0;
+		e->ov_cnt = 0;
 		e->diag.shed_mask = 0;
 		e->diag.forced_bypass = 0;
 	}
@@ -444,11 +451,20 @@ int engine_overload_feed(engine_t *e, uint32_t cycles, uint32_t limit)
 {
 	int inits = e->chunk_inits;
 	e->chunk_inits = 0;
-	if (e->overload_n == 0) return 0;
-	if (cycles <= limit) { e->over_run = 0; return 0; }
-	e->diag.overload_blocks++;
+	if (e->overload_n == 0 || e->overload_win == 0) return 0;
+	if (cycles > limit) e->diag.overload_blocks++;
 	if (inits) return 0;           /* effect init (memory clear) is a one-off, not overload */
-	if (++e->over_run < e->overload_n) return 0;
+	e->ov_sum += cycles;
+	if (++e->ov_cnt < e->overload_win) return 0;
+	uint32_t mean = (uint32_t)(e->ov_sum / e->ov_cnt);
+	e->ov_sum = 0;
+	e->ov_cnt = 0;
+	e->diag.ovl_last_mean = mean;
+	if (mean > e->diag.ovl_max_mean) e->diag.ovl_max_mean = mean;
+	if (mean <= limit) { e->over_run = 0; return 0; }
+	e->diag.overload_windows++;
+	int hard = mean > limit + limit / 8u; /* the audio thread cannot keep up: act now */
+	if (!hard && ++e->over_run < e->overload_n) return 0;
 	e->over_run = 0;
 
 	/* the most expensive slot that still runs (declared cost; later in the chain on a tie) */

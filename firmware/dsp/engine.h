@@ -81,7 +81,10 @@ typedef struct {
 	uint32_t torn_retries;         /* mailbox copies discarded because of a concurrent post */
 	uint32_t layout_errors;        /* snapshot slots refused by the audio-side check (must stay 0) */
 	/* audio thread: overload guard (engine_overload_feed) */
-	uint32_t overload_blocks;      /* blocks reported over the limit (total) */
+	uint32_t overload_blocks;      /* single blocks over the limit (total; informational only) */
+	uint32_t overload_windows;     /* guard windows whose MEAN was over the limit (total) */
+	uint32_t ovl_last_mean;        /* mean block cycles of the last complete guard window */
+	uint32_t ovl_max_mean;         /* highest window mean since boot */
 	uint32_t overload_sheds;       /* slots switched off by the guard (total) */
 	uint32_t overload_forced;      /* times the guard forced global bypass */
 	uint8_t shed_mask;             /* bit s = slot s is switched off by the guard now */
@@ -142,7 +145,9 @@ struct engine_s {
 	uint8_t shed[ENGINE_SLOTS];
 	uint8_t forced_bypass;         /* every slot off (tails too), dry signal only */
 	uint8_t chunk_inits;           /* an effect init ran in the last chunk */
-	uint32_t over_run;             /* consecutive blocks over the limit */
+	uint32_t over_run;             /* consecutive guard windows whose mean was over the limit */
+	uint64_t ov_sum;               /* cycles summed in the current guard window */
+	uint32_t ov_cnt;               /* blocks in the current guard window */
 	uint32_t shed_clear_ack;
 	float k_mix, k_in, k_gain, k_master, k_duck;
 	float duck_cur;
@@ -157,10 +162,13 @@ struct engine_s {
 	 * (75 KB) still starts with a budget below its size. Set before the audio thread runs. */
 	uint32_t init_budget;
 
-	/* Overload guard: this many consecutive blocks over the limit trigger one action
-	 * (engine_overload_feed). Set before the audio thread runs; engine_init sets
-	 * ENGINE_OVERLOAD_BLOCKS, 0 disables the guard. */
+	/* Overload guard (engine_overload_feed): the block cost is averaged over windows of
+	 * overload_win blocks; overload_n consecutive windows whose MEAN is over the limit trigger
+	 * one action (a window whose mean is over limit * 9/8 acts at once). Set before the audio
+	 * thread runs; engine_init sets ENGINE_OVERLOAD_WIN_BLOCKS / ENGINE_OVERLOAD_WINDOWS;
+	 * overload_n = 0 disables the guard. */
 	uint32_t overload_n;
+	uint32_t overload_win;
 
 	/* Tests only (NULL in firmware): called at the ENGINE_HOOK_* points. */
 	void (*hook)(engine_t *e, int point, void *ctx);
@@ -175,7 +183,11 @@ struct engine_s {
  * per-effect values are UNMEASURED estimates (static analysis + instruction-count emulation),
  * so the runtime overload guard below is the safety net, not this number. */
 #define ENGINE_DEFAULT_CPU_BUDGET 850u
-#define ENGINE_OVERLOAD_BLOCKS 8u
+/* Guard window: 32 blocks of 64 frames = 42.7 ms at 48 kHz; 3 windows = 128 ms of sustained
+ * overload (mean over the limit) before a slot is shed. Single-block spikes (interrupts, USB)
+ * cannot trigger it unless they raise the window mean over the limit. */
+#define ENGINE_OVERLOAD_WIN_BLOCKS 32u
+#define ENGINE_OVERLOAD_WINDOWS 3u
 
 void engine_config_default(engine_config_t *c);
 /* Repair a config of unknown provenance (corrupt flash, bad import). Returns number of fixes. */
@@ -210,11 +222,14 @@ void engine_resources(const engine_t *e, uint32_t *mem_used, uint32_t *cpu_used)
 /* Audio: process n frames (any n). in and out may alias. */
 void engine_process(engine_t *e, const float *in_l, const float *in_r, float *out_l, float *out_r, int n);
 /* Audio: overload guard. Call once after every engine_process() block with the cycles that
- * block's work took and the limit (e.g. 85 % of the block period). After overload_n
- * consecutive blocks over the limit (blocks that initialised an effect are ignored) the guard
- * fades out and switches off the live slot with the largest declared cpu_cycles (diag.shed_mask);
- * when no slot is left it forces global bypass (diag.forced_bypass). Returns 1 when it acted
- * on this call. The actions last until the slot gets a new effect, or engine_overload_clear(). */
+ * block's work took and the limit (e.g. 85 % of the block period). The cycles are averaged
+ * over windows of overload_win blocks (blocks that initialised an effect are left out). After
+ * overload_n consecutive windows whose mean is over the limit (~128 ms with the defaults), or
+ * one window whose mean is over limit * 9/8 (safety net: the audio thread cannot keep up), the
+ * guard fades out and switches off the live slot with the largest declared cpu_cycles
+ * (diag.shed_mask); when no slot is left it forces global bypass (diag.forced_bypass). Returns
+ * 1 when it acted on this call. The actions last until the slot gets a new effect, or
+ * engine_overload_clear(). */
 int engine_overload_feed(engine_t *e, uint32_t cycles, uint32_t limit);
 /* Control: undo the guard's actions (taken at the audio thread's next chunk). */
 void engine_overload_clear(engine_t *e);
