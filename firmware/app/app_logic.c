@@ -178,6 +178,67 @@ int contx_frame(contx_t *c, const uint8_t *f, uint32_t n)
 	return 1;
 }
 
+/* ---- FN hold fill / power-on gate ---- */
+
+int holdfill_count(uint32_t held_ms)
+{
+	uint32_t n = held_ms / HOLD_STEP_MS;
+	return n > 8u ? 8 : (int)n;
+}
+
+boot_mode_t boot_decide(uint32_t rr, int crash_pending, int poweroff_flag)
+{
+	if (poweroff_flag) return BOOT_STANDBY;                 /* our own plugged power off */
+	if (rr & (RR_DOG | RR_LOCKUP)) return BOOT_NOW;         /* crash recovery */
+	if ((rr & RR_SREQ) && crash_pending) return BOOT_NOW;   /* fatal handler's reset */
+	if (rr & (RR_RESETPIN | RR_SREQ)) return BOOT_NOW;
+	if (rr & (RR_OFF | RR_VBUS)) return BOOT_STANDBY;       /* FN wake, USB plugged in */
+	return BOOT_NOW;                                        /* power-on / flash / unknown */
+}
+
+sb_action_t standby_step(int fn_down, int usb_power, uint32_t held_ms)
+{
+	if (fn_down) return held_ms >= HOLD_MS ? SB_BOOT : SB_WAIT;
+	return usb_power ? SB_WAIT : SB_OFF;
+}
+
+/* ---- SAADC scan state machine ---- */
+
+void scanfsm_init(scanfsm_t *f)
+{
+	memset(f, 0, sizeof *f);
+}
+
+scan_act_t scanfsm_step(scanfsm_t *f, uint32_t now, int ended)
+{
+	if (!f->running) {
+		f->running = 1;
+		f->t0 = now;
+		f->starts++;
+		return SCAN_ACT_START;
+	}
+	if (ended) {
+		f->ok++;
+		f->last_ok_ms = now;
+		f->have_ok = 1;
+		f->t0 = now;
+		f->starts++;
+		return SCAN_ACT_COLLECT_START;
+	}
+	if (now - f->t0 >= SCAN_TIMEOUT_MS) {
+		f->timeouts++;
+		f->t0 = now;
+		f->starts++;
+		return SCAN_ACT_ABORT_START;
+	}
+	return SCAN_ACT_NONE;
+}
+
+uint32_t scanfsm_age(const scanfsm_t *f, uint32_t now)
+{
+	return f->have_ok ? now - f->last_ok_ms : 0xFFFFFFFFu;
+}
+
 /* ---- quiet detector ---- */
 
 void quiet_feed(quiet_t *q, float in_peak, float out_peak)

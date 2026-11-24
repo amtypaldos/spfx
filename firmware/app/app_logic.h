@@ -95,6 +95,59 @@ void contx_poll(contx_t *c, int dtr, uint32_t rx_frames);
 int contx_text(contx_t *c, const uint8_t *s, uint32_t n);
 int contx_frame(contx_t *c, const uint8_t *f, uint32_t n);
 
+/* ---- 2c. FN hold to power on / off (owner decision: 4 s, 8-LED fill) -------------------
+ * The fill: every 0.5 s of holding one more LED lights and stays lit: first the four
+ * PLAY-side LEDs (left to right), then the four track LEDs T1..T4; the 8th lights at 4.0 s
+ * together with the action. holdfill_count() gives how many are lit (0 before 0.5 s). */
+#define HOLD_MS        4000u
+#define HOLD_STEP_MS   500u
+int holdfill_count(uint32_t held_ms);   /* 0..8 */
+
+/* Boot decision (owner decisions for rc3; design follows chattock/sp1-tape-looper's
+ * charge-standby, MIT, which ships on this hardware):
+ *   STANDBY: the device stays "off" -- no USB, no audio -- until FUNCTION is held 4 s (8-LED
+ *            fill); with USB power present it shows the charge state, without it goes back to
+ *            System OFF at once. Used for: a wake from System OFF by FUNCTION (RESETREAS OFF),
+ *            a wake by USB being plugged in (VBUS), and our own power off while plugged in
+ *            (a soft reset with the retained power-off flag, because System OFF with VBUS
+ *            already present has no wake edge).
+ *   NOW:     start at once: watchdog / lockup recovery, a fatal-error reset (soft reset with a
+ *            crash record), power-on reset / fresh battery / unknown (0), reset pin, any other
+ *            soft reset. Crash recovery and the crash-loop breaker are never blocked. */
+#define RR_RESETPIN  (1u << 0)
+#define RR_DOG       (1u << 1)
+#define RR_SREQ      (1u << 2)
+#define RR_LOCKUP    (1u << 3)
+#define RR_OFF       (1u << 16)
+#define RR_LPCOMP    (1u << 17)
+#define RR_DIF       (1u << 18)
+#define RR_NFC       (1u << 19)
+#define RR_VBUS      (1u << 20)
+typedef enum { BOOT_NOW = 0, BOOT_STANDBY } boot_mode_t;
+boot_mode_t boot_decide(uint32_t resetreas, int crash_pending, int poweroff_flag);
+typedef enum { SB_WAIT = 0, SB_BOOT, SB_OFF } sb_action_t;
+/* one standby step: FN (debounced) held for held_ms, USB power present? */
+sb_action_t standby_step(int fn_down, int usb_power, uint32_t held_ms);
+
+/* ---- 2d. SAADC scan state machine (zephyr_sp1fx drivers/saadc_scan.c) ------------------
+ * Non-blocking and self-healing: a scan is started in one control tick and collected in a
+ * later one; a scan that has not ended after SCAN_TIMEOUT_MS is aborted and restarted (never
+ * latched, never waited for). The hardware layer executes the returned action. */
+#define SCAN_TIMEOUT_MS 50u
+typedef enum { SCAN_ACT_NONE = 0, SCAN_ACT_START, SCAN_ACT_COLLECT_START, SCAN_ACT_ABORT_START } scan_act_t;
+typedef struct {
+	uint8_t running;
+	uint32_t t0;          /* start of the running scan */
+	uint32_t ok, timeouts, starts;
+	uint32_t last_ok_ms;
+	uint8_t have_ok;
+} scanfsm_t;
+void scanfsm_init(scanfsm_t *f);
+/* ended: the hardware reports the running scan complete (EVENTS_END) */
+scan_act_t scanfsm_step(scanfsm_t *f, uint32_t now_ms, int ended);
+/* ms since the last good scan (0xFFFFFFFF if none yet) */
+uint32_t scanfsm_age(const scanfsm_t *f, uint32_t now_ms);
+
 /* ---- 3. audio quiet detector -------------------------------------------------------- */
 #define QUIET_PEAK 0.0005f         /* -66 dBFS: below this a block counts as silent */
 typedef struct {

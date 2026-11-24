@@ -490,6 +490,100 @@ static void test_preset_sequence_with_audio_stopped(void)
 	CHECK(e.duck == 0); /* every preset load released its duck */
 }
 
+static void test_boot_and_standby(void)
+{
+	/* fill count */
+	CHECK(holdfill_count(0) == 0 && holdfill_count(499) == 0 && holdfill_count(500) == 1);
+	CHECK(holdfill_count(3999) == 7 && holdfill_count(4000) == 8 && holdfill_count(99999) == 8);
+	/* boot decision: wake reason x crash record x power-off flag */
+	CHECK(boot_decide(RR_OFF, 0, 0) == BOOT_STANDBY);          /* FN wake */
+	CHECK(boot_decide(RR_VBUS, 0, 0) == BOOT_STANDBY);         /* USB plugged into an off unit */
+	CHECK(boot_decide(RR_SREQ, 0, 1) == BOOT_STANDBY);         /* our plugged power off */
+	CHECK(boot_decide(0, 0, 1) == BOOT_STANDBY);
+	CHECK(boot_decide(RR_DOG, 0, 0) == BOOT_NOW);              /* watchdog recovery */
+	CHECK(boot_decide(RR_DOG | RR_OFF, 0, 0) == BOOT_NOW);
+	CHECK(boot_decide(RR_LOCKUP, 0, 0) == BOOT_NOW);
+	CHECK(boot_decide(RR_SREQ, 1, 0) == BOOT_NOW);             /* fatal-error reset */
+	CHECK(boot_decide(RR_SREQ, 0, 0) == BOOT_NOW);             /* other soft reset (e.g. after DFU) */
+	CHECK(boot_decide(RR_RESETPIN, 0, 0) == BOOT_NOW);
+	CHECK(boot_decide(0, 0, 0) == BOOT_NOW);                   /* power-on reset / flash / battery in */
+	CHECK(boot_decide(0, 1, 0) == BOOT_NOW);
+	/* standby: FN x USB x time held */
+	for (uint32_t t = 0; t < HOLD_MS; t += 50) {
+		CHECK(standby_step(1, 0, t) == SB_WAIT && standby_step(1, 1, t) == SB_WAIT);
+	}
+	CHECK(standby_step(1, 0, HOLD_MS) == SB_BOOT && standby_step(1, 1, HOLD_MS) == SB_BOOT);
+	CHECK(standby_step(0, 0, 0) == SB_OFF);    /* battery, nothing held: back to System OFF */
+	CHECK(standby_step(0, 1, 0) == SB_WAIT);   /* plugged in: stay, show charging */
+	/* simulated presses from a FN wake on battery: tap / 2 s / 3.99 s -> off; > 4 s -> on */
+	const uint32_t press[] = {80, 2000, 3990, 4010, 7000};
+	const sb_action_t want[] = {SB_OFF, SB_OFF, SB_OFF, SB_BOOT, SB_BOOT};
+	for (int k = 0; k < 5; k++) {
+		sb_action_t a = SB_WAIT;
+		uint32_t held = 0;
+		for (uint32_t t = 0; a == SB_WAIT && t < 10000; t += 10) {
+			int fn = t < press[k];
+			held = fn ? t : 0;
+			a = standby_step(fn, 0, held);
+		}
+		CHECK_MSG(a == want[k], "press %u -> %d", press[k], a);
+	}
+	/* plugged in: a short press, release, later a 4 s hold -> on; never off meanwhile */
+	{
+		sb_action_t a = SB_WAIT;
+		uint32_t t0 = 0;
+		for (uint32_t t = 0; t < 20000 && a == SB_WAIT; t += 10) {
+			int fn = (t >= 1000 && t < 1300) || t >= 5000;
+			if (fn && !(t > 1000 && t < 1300) && t != 5000 && t0 == 0) t0 = 5000;
+			uint32_t held = fn ? (t >= 5000 ? t - 5000 : t - 1000) : 0;
+			a = standby_step(fn, 1, held);
+			CHECK(a != SB_OFF);
+		}
+		CHECK(a == SB_BOOT);
+	}
+}
+
+/* SAADC scan: start, collect, and -- the rc2 hardware failure -- a scan that never ends is
+ * aborted and restarted, after which scanning continues normally (never latched). */
+static void test_scanfsm_timeout_recovery(void)
+{
+	scanfsm_t f;
+	scanfsm_init(&f);
+	CHECK(scanfsm_age(&f, 0) == 0xFFFFFFFFu);
+	CHECK(scanfsm_step(&f, 0, 0) == SCAN_ACT_START);
+	uint32_t t = 8;
+	for (; t < 1000; t += 8) CHECK(scanfsm_step(&f, t, 1) == SCAN_ACT_COLLECT_START);
+	CHECK(f.ok == 124 && f.timeouts == 0 && scanfsm_age(&f, t) <= 8);
+	/* the hardware stops answering for 5 s: one abort+restart per SCAN_TIMEOUT_MS, no latch */
+	int aborts = 0, none = 0;
+	for (uint32_t e = t + 5000; t < e; t += 8) {
+		scan_act_t a = scanfsm_step(&f, t, 0);
+		if (a == SCAN_ACT_ABORT_START) aborts++;
+		else { CHECK(a == SCAN_ACT_NONE); none++; }
+	}
+	CHECK(aborts >= 5000 / 56 - 2 && aborts <= (int)(5000 / SCAN_TIMEOUT_MS) + 1);
+	CHECK(none > aborts);
+	CHECK(f.timeouts == (uint32_t)aborts && f.running);
+	CHECK(scanfsm_age(&f, t) >= 5000);
+	/* it answers again: the next tick collects, and scanning goes on */
+	CHECK(scanfsm_step(&f, t, 1) == SCAN_ACT_COLLECT_START);
+	CHECK(scanfsm_age(&f, t) == 0);
+	uint32_t ok0 = f.ok;
+	for (int k = 0; k < 100; k++) { t += 8; CHECK(scanfsm_step(&f, t, 1) == SCAN_ACT_COLLECT_START); }
+	CHECK(f.ok == ok0 + 100);
+	/* a single lost scan costs one timeout, then normal again */
+	uint32_t to0 = f.timeouts;
+	for (uint32_t k = 0; k < SCAN_TIMEOUT_MS; k += 8) { t += 8; scanfsm_step(&f, t, 0); }
+	CHECK(f.timeouts == to0 + 1);
+	t += 8;
+	CHECK(scanfsm_step(&f, t, 1) == SCAN_ACT_COLLECT_START);
+	/* clock wrap */
+	scanfsm_init(&f);
+	scanfsm_step(&f, 0xFFFFFFF0u, 0);
+	CHECK(scanfsm_step(&f, 0xFFFFFFF8u, 0) == SCAN_ACT_NONE);
+	CHECK(scanfsm_step(&f, 0x00000040u, 0) == SCAN_ACT_ABORT_START);
+}
+
 int main(void)
 {
 	RUN(test_save_sched_rules);
@@ -503,5 +597,7 @@ int main(void)
 	RUN(test_contx_separator_when_full);
 	RUN(test_connect_burst_and_reconnect);
 	RUN(test_preset_sequence_with_audio_stopped);
+	RUN(test_boot_and_standby);
+	RUN(test_scanfsm_timeout_recovery);
 	T_DONE();
 }
