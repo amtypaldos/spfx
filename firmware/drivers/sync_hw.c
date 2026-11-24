@@ -49,6 +49,7 @@ static midi_out_t core;
 static uint32_t midi_mask, po_mask, all_mask;
 static volatile int midi_on, po_on;
 static volatile uint32_t isr_count, late_count, max_lat;
+static int timer_running;
 
 static void sync_timer_isr(const void *arg)
 {
@@ -124,10 +125,50 @@ int sync_hw_init(const sync_hw_cfg_t *cfg)
 	SYNC_TIMER->SHORTS = TIMER_SHORTS_COMPARE0_CLEAR_Msk;
 	SYNC_TIMER->INTENSET = TIMER_INTENSET_COMPARE0_Msk;
 	IRQ_CONNECT(TIMER2_IRQn, SYNC_TIMER_PRIO, sync_timer_isr, NULL, 0);
+	if (cfg->start_stopped) {
+		timer_running = 0;
+		return 0;
+	}
 	irq_enable(SYNC_TIMER_IRQn);
 	SYNC_TIMER->TASKS_CLEAR = 1u;
 	SYNC_TIMER->TASKS_START = 1u;
+	timer_running = 1;
 	return 0;
+}
+
+void sync_hw_run(int on)
+{
+	if (on && !timer_running) {
+		SYNC_TIMER->EVENTS_COMPARE[0] = 0u;
+		NVIC_ClearPendingIRQ(SYNC_TIMER_IRQn);
+		irq_enable(SYNC_TIMER_IRQn);
+		SYNC_TIMER->TASKS_CLEAR = 1u;
+		SYNC_TIMER->TASKS_START = 1u;
+		timer_running = 1;
+	} else if (!on && timer_running) {
+		SYNC_TIMER->TASKS_STOP = 1u;
+		irq_disable(SYNC_TIMER_IRQn);
+		SYNC_TIMER->EVENTS_COMPARE[0] = 0u;
+		NVIC_ClearPendingIRQ(SYNC_TIMER_IRQn);
+		/* idle levels on both lines */
+		midi_out_levels_t idle = midi_out_idle_levels(&core);
+		uint32_t set = (idle.midi ? midi_mask : 0u) | (idle.po ? po_mask : 0u);
+
+		NRF_P0->OUTSET = set;
+		NRF_P0->OUTCLR = all_mask & ~set;
+		timer_running = 0;
+	}
+}
+
+int sync_hw_running(void)
+{
+	return timer_running;
+}
+
+int sync_hw_drained(void)
+{
+	return midi_out_pending(&core) == 0u && !midi_out_busy(&core) &&
+	       core.po_req == core.po_done && core.po_remaining == 0u;
 }
 
 int sync_hw_midi(uint8_t byte)
@@ -165,6 +206,7 @@ void sync_hw_stats(sync_hw_stats_t *out, int reset_max)
 
 void sync_hw_shutdown(void)
 {
+	timer_running = 0;
 	irq_disable(SYNC_TIMER_IRQn);
 	SYNC_TIMER->TASKS_STOP = 1u;
 	SYNC_TIMER->INTENCLR = 0xFFFFFFFFu;

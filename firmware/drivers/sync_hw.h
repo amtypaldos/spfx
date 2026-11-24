@@ -34,6 +34,8 @@ typedef struct {
 	uint32_t po_pulse_ms; /* 5 in Tape Looper */
 	int midi_enable;      /* 0: never queue MIDI bytes (line held idle) */
 	int po_enable;        /* 0: never queue PO pulses (line held idle) */
+	int start_stopped;    /* 1: configure pins + timer but leave the 32 us timer (and its
+	                       * 31,250 interrupts/s) OFF until sync_hw_run(1) */
 } sync_hw_cfg_t;
 
 typedef struct {
@@ -53,6 +55,13 @@ void sync_hw_enable(int midi_enable, int po_enable);
 
 const midi_out_t *sync_hw_core(void);
 void sync_hw_stats(sync_hw_stats_t *out, int reset_max);
+
+/* Start (1) / stop (0) the 32 us bit timer. Stopping drives the idle levels; call it only
+ * when sync_hw_drained() (or anything still queued is cut). Thread context. */
+void sync_hw_run(int on);
+int sync_hw_running(void);
+/* 1 when no MIDI byte is queued or on the wire and no PO pulse is pending or active. */
+int sync_hw_drained(void);
 
 /* Stop the timer and return all three pins to their reset state (input,
  * disconnected) — used before SYSTEM_OFF so nothing keeps the PNP biased. */
