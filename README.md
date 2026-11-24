@@ -6,46 +6,20 @@ This is an unofficial hobby project. It is not affiliated with, endorsed by, or 
 
 ## Status
 
-**Development firmware. Only a few images have run on the owner's hardware, and nothing here is production-ready.** The evidence labels below follow `docs/STATUS.md`.
+**Development firmware. Only bring-up images have run on the owner's hardware, and nothing here is production-ready.** The evidence labels follow `docs/STATUS.md`.
 
-**Verified on hardware** (owner-observed, spare unit, 2026-11-24; see `docs/STATUS.md` for details):
+**Newest image: `sp1fx-v1-rc1.bin`, the integrated firmware (`firmware/app/zephyr_sp1fx`). Built and host-tested, NOT RUN ON HARDWARE yet.** It combines USB audio + effects, buttons/faders/LEDs, VOL+/VOL- volume (2 dB steps, saved), the companion protocol on the USB serial port, settings saved to internal flash (0xFD000-0xFEFFF), and the sync jack (off by default, untested with gear). Owner test plan: `docs/BRINGUP_SP1FX.md`.
 
-- Minimal heartbeat image: boots, track LED 1 blinks.
-- Tone image (`zephyr_tone`): codec init, I2S clocking and channel order confirmed by ear (left channel low tone, right channel high tone).
-- Controls image (`zephyr_controls`): all 10 buttons decode, faders span 0-100%, effect cycling and wrap-around, preset cycling with FN + rocker, bypass tap, volume steps, PLAY global bypass, FN-hold power-off, soft-takeover cue and edit mode (LED behaviour as the owner observed it).
-- Sync image (`zephyr_sync`): serial log shows MIDI clock and PO pulse scheduling as expected. **Not tested with real sync gear.**
-- USB audio image A, v1 (`zephyr_usbaudio`): Mac audio plays through the real engine at 48 kHz, 60+ s with no underruns. Clean preset costs about 130-215 cycles/frame. **The first FN tap (Clean to Dub Station) crashed the firmware**: static, then a watchdog reset about 5 s later. The device recovered and the stream resumed. The root cause is not proven.
+**Verified on hardware** (owner-observed, spare unit, 2026-11-24; see `docs/STATUS.md`):
 
-**Source-only or simulated** (host tests on a development Mac, `make test`):
+- Minimal heartbeat, tone (codecs, I2S, channel order), controls (all buttons, faders, effect and preset cycling, soft takeover, edit mode, volume steps, power off) and sync (serial log only, no gear) bring-up images.
+- USB audio v3 (`zephyr_usbaudio`, optimised DSP): Mac audio through the engine, the six presets at about 50 % CPU, no crashes (reported by the lead). Ambient tripped the old overload guard on short spikes; the guard is changed in v1-rc1 (untested on hardware).
 
-- DSP core: 10 effects plus None, the 4-slot engine, memory and CPU admission control, tails, limiter.
-- Controls logic: debounce, gestures, soft takeover, LED encoding.
-- Persistence, the binary protocol, and the six factory presets (each checked against the admission limits).
-- Simulator: WAV in, WAV out, through the real engine.
-- The companion web app: 55 Node tests and a headless smoke test. **It has never been run against a real SP-1.**
-- Effect CPU costs in the effect descriptors are estimates, not measurements.
+**Source-only or simulated** (host tests, `make test`): the 4-slot engine and 10 effects, controls logic, persistence journal and its erase scheduling, the binary protocol, factory presets, the simulator, the companion web app (never run against a real SP-1).
 
-**Untested:**
+**Untested:** everything that is new in v1-rc1 (see above), sync with real gear, latency, headphone/speaker switching, iPhone/iPad/Android hosts, Windows (expected not to work).
 
-- USB audio image B (`zephyr_usbaudio_io`, return stream to the host) on hardware.
-- USB audio v2 images (crash mitigations, staged-config mailbox, crash dump). Built but not flashed.
-- Sync jack with real gear (EP-133, EP-40, PO, Volca).
-- Latency measurements, headphone/speaker switching, pop-free preset switching.
-- FN-hold power-off while USB is plugged in (the minimal image may stay dark until FUNCTION is pressed or USB is replugged).
-- Companion app against a real device.
-- iPhone, iPad and Android as USB audio sources.
-
-**Known issues:**
-
-- The effects are currently too CPU-heavy on hardware for some presets. This is the leading suspect for the v1 crash, but it is not proven. Optimisation is in progress and CPU per preset still needs measuring on the device.
-- On hardware the effects behave statically so far. Tempo-synced effects are not implemented.
-- Replacing an effect cuts the old effect's tail abruptly.
-- Saturation and bitcrusher are not oversampled, so aliasing at high settings is expected.
-- Soft-takeover pickup window and deadband are guesses until fader noise is measured.
-- Only 8 LEDs, each a single monochrome LED. Brightness steps and visibility floor still need tuning on the device.
-- The sync jack is a digital output only (MIDI clock and PO pulses). Real-gear behaviour is untested.
-- USB audio has no volume control on the device. Volume is the host's software volume.
-- Windows is not supported. Image A is expected to fail on Windows (Code 10). Image B needs implicit feedback, which the Windows built-in driver does not support.
+**Known issues / limits:** replacing an effect cuts the old tail; saturation and bitcrusher alias at high settings; soft-takeover thresholds are guesses; only 8 monochrome LEDs; the Mac cannot control the volume over USB (use VOL+/VOL-); Windows is not supported (explicit-feedback UAC2 without Tape Looper's Windows patch).
 
 ## Controls guide
 
@@ -62,7 +36,7 @@ Text summary of the controls, for readers who cannot see the image:
 - **FN + FWD/REV:** previous or next preset. Holding repeats.
 - **PLAY tap:** global bypass. A single LED walks across the track LEDs while bypassed.
 - **FN hold 1.5 s:** power off, return to the bootloader.
-- **VOL- / VOL+:** master volume in 16 steps. Holding repeats.
+- **VOL- / VOL+:** master volume, 2 dB per press (-60 to 0 dB), shown as a bar on the PLAY-side LEDs. Holding repeats. Saved. (The guide image still says 16 steps; the HTML source is updated.)
 - **Soft takeover:** when a fader changes role, its value does not jump. Its LED blinks while you move it toward the stored value. A bright flash on a dim base means move up. A bright blink with a dark gap means move down. A steady LED means picked up.
 - **LEDs beside PLAY:** output level, or a flashing row when a change is refused (for example, an effect that does not fit the DSP memory or CPU budget).
 
@@ -88,8 +62,10 @@ firmware/
   protocol/            binary protocol, device side
   storage/             versioned config record and power-loss-safe journal
   drivers/             ladder/fader, LEDs, sync, MIDI out, crash dump (Zephyr side)
-  app/                 Zephyr apps: zephyr_min, zephyr_tone, zephyr_controls,
-                       zephyr_sync, zephyr_usbaudio, zephyr_usbaudio_io
+  app/                 Zephyr apps: zephyr_sp1fx (integrated firmware), zephyr_min,
+                       zephyr_tone, zephyr_controls, zephyr_sync, zephyr_usbaudio,
+                       zephyr_usbaudio_io, zephyr_fxprof; app_logic.c (host-tested
+                       save/console decisions)
   boards/              SP-1 board definition (from Tape Looper, MIT) and licences
   scripts/             build_firmware.sh, build_controls.sh, build_sync.sh, check_image.py
   west.yml, west-lock.json   pinned Zephyr and module versions
@@ -132,6 +108,8 @@ firmware/scripts/build_firmware.sh verify   # checks commit pins and SDK version
 firmware/scripts/build_firmware.sh --app zephyr_tone
 firmware/scripts/build_firmware.sh --app zephyr_usbaudio
 firmware/scripts/build_firmware.sh --app zephyr_usbaudio_io
+firmware/scripts/build_firmware.sh --app sp1fx              # integrated firmware (zephyr_sp1fx)
+firmware/scripts/build_firmware.sh --app sp1fx repro        # two clean builds, byte-identical check
 ```
 
 The controls and sync images have their own scripts, `firmware/scripts/build_controls.sh` and `firmware/scripts/build_sync.sh`. The `release` mode of the sync script copies its output to the staging folder described below. The build scripts have no flash, runner, debug or serial step.
@@ -142,7 +120,7 @@ The controls and sync images have their own scripts, `firmware/scripts/build_con
 
 - **Nothing in this repository flashes anything, and the firmware is never flashed automatically.** Flashing is a manual step that the owner does.
 - Flashing replaces the current app. Check the image name and SHA-256 before you flash.
-- Never write to the bootloader (0x00000-0x1FFFF), the Bluetooth module, eMMC, or the storage page (0xFF000). The images are linked to the app slot at 0x20000 and `check_image.py` enforces that. Do not erase storage.
+- Never write to the bootloader (0x00000-0x1FFFF), the Bluetooth module, eMMC, or the storage page (0xFF000). The images are linked to the app slot at 0x20000 and `check_image.py` enforces that. Do not erase storage. The integrated firmware (`sp1fx-v1-rc1.bin`) itself writes only its two settings pages 0xFD000-0xFEFFF, inside the app slot and outside its image (`check_image.py --reserve`, `docs/ADR-003-storage.md`).
 - The SP-1 has no reset pin. An app that does not feed the watchdog (every 5 s) boot-loops until the bootloader is re-entered. An app that cannot reach SYSTEM_OFF can only be recovered through the bootloader key combination.
 - **Keep a recovery image ready.** The Tape Looper release image (`RECOVERY-tape-looper-from-repo.bin`, SHA-256 `e73e3786...badbf`) is the known-good fallback. The tone and minimal heartbeat images have also booted on the owner's unit.
 - Start with the computer volume low and the headphones off your ears. USB audio images have a fade-in and a digital trim, but the analog gains are not yet measured.
@@ -166,9 +144,11 @@ Staged images are kept outside the repository, in `~/spfx/flash-ready/`. They ar
 | `sp1fx-usbaudio-in-v2.bin` | USB audio in, A, v2 (crash mitigations and crash dump). Not flashed yet. |
 | `sp1fx-usbaudio-io.bin` (v1) | USB audio in and return to host, B. Not run on hardware. Superseded. |
 | `sp1fx-usbaudio-io-v2.bin` | USB audio in and return to host, B, v2. Not flashed yet. |
+| `sp1fx-usbaudio-in-v3.bin` | USB audio in, A, v3 (optimised DSP, overload guard). Runs on the owner's unit (presets ~50 % CPU). |
+| `sp1fx-v1-rc1.bin` | **Integrated firmware v1 release candidate 1.** Not run on hardware yet. Test plan: `docs/BRINGUP_SP1FX.md`. |
 | `RECOVERY-tape-looper-from-repo.bin` | Tape Looper release, recovery only. Not built from this repository. |
 
-Bring-up procedures and pass/fail checklists are in `docs/BRINGUP_TONE.md`, `docs/BRINGUP_CONTROLS.md`, `docs/BRINGUP_SYNC.md` and `docs/BRINGUP_USBAUDIO.md`.
+Bring-up procedures and pass/fail checklists are in `docs/BRINGUP_SP1FX.md` (integrated firmware), `docs/BRINGUP_TONE.md`, `docs/BRINGUP_CONTROLS.md`, `docs/BRINGUP_SYNC.md` and `docs/BRINGUP_USBAUDIO.md`.
 
 ## Credits and licences
 

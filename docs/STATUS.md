@@ -1,6 +1,57 @@
 # SP-1 FX — status, test results, known issues
 
-Evidence key: **[HOST]** verified by automated tests on a development Mac. **[SRC]** from upstream source/docs. **[TODO]** not started. Nothing here has been run on an SP-1.
+Evidence key: **[HW]** observed on the owner's SP-1 (owner-run; see the hardware log). **[HOST]** verified by automated tests on a development Mac. **[SRC]** from upstream source/docs or our own build output. **[UNTESTED]** built but never run. **[TODO]** not started. The integrated image v1-rc1 has **not** been run on an SP-1.
+
+## v1-rc1: integrated firmware (2026-11-24) -- NOTHING OF THIS IMAGE IS HARDWARE-VERIFIED
+
+`firmware/app/zephyr_sp1fx` -> `~/spfx/flash-ready/sp1fx-v1-rc1.bin`, SHA-256
+`cf09092a75e575f643c869b8b7a8155f9b28ece42a70d8151b789c67bd20a9a8`, 144,864 B at 0x20000,
+RAM 205,240 B of 256 KiB, `check_image.py` PASS (incl. `--reserve 0xFD000:0xFF000`), two clean
+builds byte-identical, 0 compiler warnings. [SRC] Owner test plan: `docs/BRINGUP_SP1FX.md`.
+
+| Part | Where it comes from | Evidence |
+|---|---|---|
+| USB audio in (UAC2 explicit feedback) -> engine -> I2S, codecs, headphone switch, crash dump, starvation guard | zephyr_usbaudio image A v3, same code | the v3 image [HW]; this image [UNTESTED] |
+| Buttons, faders, gestures, soft takeover, LED renderer, FN + rocker presets | zephyr_controls + controller.c | the controls image [HW]; in this image (with audio running) [UNTESTED] |
+| VOL+/VOL-: 2 dB per press on the -60..0 dB master taper, volume bar on the PLAY-side LEDs, saved; output trim now -6 dB (was -12) | new `controls/volume.c`, controller | [HOST] (step grid, dB mapping vs the engine's actual gain, repeat, LED bar, protocol event bytes); loudness [UNTESTED] |
+| Device preset list = the six factory presets, **one Clean**; a preset load keeps the volume | controller (`preset_keep_master`) | [HOST] |
+| Overload guard: mean over 32-block windows, 3 windows over 85 % (~128 ms) or one over ~96 % | `engine_overload_feed` | [HOST] (the hardware Ambient pattern never acts in 20,000 blocks); [UNTESTED] on the device |
+| Companion protocol on the CDC ACM port; text diag until the first valid frame, then binary only (one 0x00 separator), back to text when the port closes | protocol.c + `app/app_logic.c` | protocol [HOST] (unchanged, golden frames vs the JS); mode switch [HOST]; over real USB [UNTESTED] |
+| Settings journal in 0xFD000-0xFEFFF; chunked writes; erases only while quiet (pre-erase of the spare page), at power off or SAVE_NOW, always ducked | config_store.c (+ spare pre-erase API), app_logic.c | [HOST] (power loss, pre-erase, 2 h simulated session: 0 erases while audible); Zephyr erase is one blocking NVMC op [SRC]; timing on the device [UNTESTED] |
+| Sync jack (MIDI clock + PO), clocked by rendered audio frames, **default off**, pins/timer untouched until switched on, on/off saved | sync_hw.c (+ run/stop), sync_out.c | scheduler [HOST]; driver serial log [HW] in the sync image; with gear and in this image [UNTESTED] |
+| Diagnostics: engine vs whole-block cycles, pre-emption overhead, per-thread CPU share (runtime stats), store/sync/console counters | main.c | [UNTESTED] |
+
+CPU estimate with the controls running [estimate, unmeasured]: v3 presets ~50 % [HW], plus
+~2-4 % for the control thread (SAADC scan, controller, LEDs, protocol), the config copies while
+faders move (now word copies) and the runtime statistics; sync on adds ~4-6 % (31,250 bit-timer
+interrupts/s). The new `threads%` diag line measures it.
+
+Fixes in this round:
+1. Duplicate Clean: the usbaudio images had "Clean" at index 0 plus `clean.json` in the
+   factory table. v1-rc1 uses the factory table only. [HOST] (the old images are unchanged.)
+2. Overload guard false trips (Ambient, reverb shed 14 times on hardware): windowed mean as
+   above. Ambient was not changed: the reverb's cost is parameter-independent, so there is no
+   cheaper Ambient setting; spike sources are reduced instead (no text on the port while the
+   companion is connected; diag lines every 2 s instead of 4 lines per second), and the new
+   diag line separates engine spikes from pre-emption. [HOST] / [UNTESTED]
+3. Input clip: by design, no change. `in_clip` counts host samples at full scale before the
+   input gain; the clipping (if any) happened on the Mac. Internally float with headroom and
+   an output soft limiter. Remedy: lower the source, or the companion's input gain. [SRC]
+4. T3/T4 blink on first fader touch: no cause found in the code (takeover cue, renderer, PWM
+   update and PWM release checked). This image prints every soft-takeover state change (`K`
+   lines) so the next occurrence can be pinned down. [SRC]
+5. Engine `post()` copied the ~900 B config with the byte-wise libc memcpy (struct
+   assignment) on every fader move; now word copies. [HOST]
+
+Flash safety [SRC]: ADR-003 addresses re-verified against the board dts; slot0 shortened to
+0x20000-0xFCFFF in the app overlay, settings partition 0xFD000-0xFEFFF, board `storage`
+0xFF000 untouched; compile-time asserts + a runtime range check on every flash access +
+`check_image.py --reserve`. The brief's "0xFF000 area" was not used: ADR-003 explicitly keeps
+settings out of the board's `storage` page.
+
+Not done / open: device-side user presets (owner decision: companion only); the guide PNG/PDF
+still say "16 steps" (HTML updated); Windows; latency measurement.
+
 
 ## What exists
 | Area | State |
@@ -11,8 +62,8 @@ Evidence key: **[HOST]** verified by automated tests on a development Mac. **[SR
 | Simulator (`simulator/`) | WAV in/out through the real engine, `--list`, `--bench`. **[HOST]** |
 | Config sanitising (`engine_config_sanitize`) | repairs corrupt configs. **[HOST]** Binary storage/journal: **[TODO]** |
 | USB audio in/out, I2S, codec drivers, ladder decode, LED PWM | **[TODO]** (reuse Tape Looper drivers, MIT) |
-| Persistence (`firmware/storage`) | versioned record + two-page power-loss-safe journal, write debounce. **[HOST]** |
-| Protocol (`docs/PROTOCOL.md`, `firmware/protocol`) | spec + C device side, byte-compatible with the companion's JS on golden frames, 100k-stream fuzz. **[HOST]** USB CDC transport: **[TODO]** |
+| Persistence (`firmware/storage`) | versioned record + two-page power-loss-safe journal, write debounce, spare-page pre-erase. **[HOST]** On flash at 0xFD000-0xFEFFF in v1-rc1 **[UNTESTED]** |
+| Protocol (`docs/PROTOCOL.md`, `firmware/protocol`) | spec + C device side, byte-compatible with the companion's JS on golden frames, 100k-stream fuzz. **[HOST]** USB CDC transport: built in v1-rc1 **[UNTESTED]** |
 | Companion (`companion/`) | Web Serial + demo device, Tape Looper-style UI, presets. 51 Node tests + headless browser smoke test. Never run against a real SP-1. |
 | Factory presets (`presets/`, `firmware/app/factory_presets.h`) | six presets, each runs through the real engine within budget. **[HOST]** |
 | Build (`docs/BUILD.md`, `firmware/scripts`, `firmware/app/zephyr_min`) | Zephyr **v4.3.1** (Tape Looper's lock file pins this, not 4.1) + SDK 0.17.4 in `../toolchain`. Minimal heartbeat/watchdog/FN-power-off image builds: 17,316 B at 0x20000, bit-identical across 3 clean builds, `check_image.py` passes. **Verified on hardware (owner report, 2026-11-24, spare SP-1, flashed via Solderless): the image boots and track LED 1 blinks.** Not yet confirmed: steady blinking beyond the 5 s watchdog window, FN-hold power-off, behavior with USB plugged in. |
@@ -80,7 +131,8 @@ Images (built, check_image PASS, reproducible, **not run on hardware**): `sp1fx-
 `sp1fx-usbaudio-in-v3.bin` (315d7eef...e00f; docs/BRINGUP_USBAUDIO.md "v3").
 Next: owner runs fxprof -> replace the declared values with measured ones.
 
-## Test results (`make test`: 12 C test binaries; `node --test companion/tests/*.test.mjs`: 55; all pass)
+## Test results (`make test`: 12 C test binaries; `node --test companion/tests/*.test.mjs`: 55; all pass, 0 warnings)
+- v1-rc1 additions: `test_app_logic` 75,359 checks (save/erase scheduling incl. a 2 h simulated session with the real journal, console mode switch, 0x00 separator through the C parser, quiet detector, rate limiter); `test_controls` +volume grid/dB/LED bar, one Clean, volume kept on preset load (318 total); `test_storage` +spare pre-erase and power cut during it (2,725); `test_fxprof_core` windowed guard (271,539); `test_protocol` VOL+ event golden frame regenerated from the JS for the 2 dB grid (903).
 - Also: `test_storage` 1,426 checks, `test_protocol` 903, `test_presets` 557, `test_controls` 172.
 - `test_dsp`: 2,382 checks. Parameter map/unmap, silence, 16 parameter corners x every effect with loud noise, automation stability, stereo isolation, filter frequency response (LP/HP), delay timing exact to the sample, feedback ratio, reverb decay, chorus delay, tremolo depth, compressor level, fast-math accuracy, recovery after NaN.
 - `test_fxprof_core`: 250,922 checks. Every profiling case admitted, finite, bounded, not silent; signal deterministic and looping; overload guard (spikes ignored, sheds most expensive slot first, fade without click, forced bypass, clear, init blocks ignored, disabled); `fx_floori` exact vs floorf, `fx_exp2`, `fx_softclip` (odd, monotonic, bounded, within 0.1 of fx_tanh), `fx_flush_fast` (exact above 2e-11, never denormal), word copy/clear, `fx_dl_q` identical to the old rounding.
@@ -100,7 +152,7 @@ Next: owner runs fxprof -> replace the declared values with measured ones.
 - 8 LEDs, each a single dimmable LED (4 track + 4 beside PLAY). "Length" encodings are impossible; patterns use brightness/blink only. PWM gamma and visibility floor need tuning on a device.
 - Rocker is two momentary buttons; button ladder decode thresholds still to be taken from upstream (calibrated raw ADC values).
 - Soft-takeover pickup window (2.5%) and deadband (0.4%) are guesses pending real fader noise measurements.
-- Default config starts with all slots bypassed and master at 75%.
+- Default config (no saved settings) starts with all slots bypassed and master at 75 % (-15 dB, -21 dBFS ceiling with the -6 dB trim).
 
 ## Next steps (suggested order)
 1. Persistence: versioned binary config + A/B journal on a mock flash, power-loss tests (host).
@@ -130,4 +182,5 @@ Next: owner runs fxprof -> replace the declared values with measured ones.
 - 2026-11-24 (owner-run, console-captured): `sp1fx-usbaudio-in.bin` (v1) OBSERVED: USB audio from a Mac plays through the real engine on the SP-1 (speaker), 48 kHz, drift feedback converged (~48.000 frames/ms), 60+ s with 0 underruns/overruns/I2S errors; first real CPU numbers: Clean preset (all bypassed) about 130-215 cycles/frame average, peaks 400-490; the Mac cannot control the volume (no UAC2 volume control); output peak only -15 dBFS because master 75% and the analog stages were set quiet on purpose. **CRASH OBSERVED:** the first FN tap (Clean -> Dub Station) hung the firmware: static, then silence, watchdog reset (`rr=2`) after about 5 s, device recovered by itself and the Mac stream resumed.
 - Crash analysis (subagent, not reproduced on hardware): two real engine bugs found and fixed (non-atomic `engine_apply_config` race with the audio thread; unchanged slots kept running at a stale layout after a config change), neither proven to be THE cause. Leading unproven hypothesis: Dub Station costs more CPU than the budget on the real M4F, so the priority-0 audio thread starves the main thread and the watchdog feed. Mitigations in v2: staged-config mailbox, init budget per block, starvation guard, audio stack 6 KB, crash dump (`CRASH:` line on next boot) and diagnostics (`diag` line). v2 images: `sp1fx-usbaudio-in-v2.bin` (SHA-256 9da4341d...5cd3), `sp1fx-usbaudio-io-v2.bin` (fb8b3efa...2ab7). NOT yet flashed. Retest steps: docs/BRINGUP_USBAUDIO.md.
 - Declared effect CPU costs in the effect descriptors are estimates written before any measurement; the Clean passthrough already costs more than expected, so treat all declared numbers as unreliable until measured per preset on the device.
+- 2026-11-24 (owner-run, relayed by the lead; console not seen by me): `sp1fx-usbaudio-in-v3.bin`: the six presets run at about 50 % CPU, no crashes. Ambient: average ~49 %, occasional blocks ~1,190 cycles/frame (89 %), the overload guard shed the reverb slot 14 times. `in_clip` counted (hot Mac source). Master 0.75 is quiet and the Mac cannot change the volume. These led to the v1-rc1 changes above.
 - 2026-11-24 (owner-run, console): `sp1fx-usbaudio-in-v2.bin` OBSERVED: no crash on preset changes, but Clean ~138 cycles/frame and every effect preset 2,270-2,430 cycles/frame (170-200 % CPU), audio static. Analysis and fix (not yet run on hardware): see "CPU" section; new images `sp1fx-fxprof.bin`, `sp1fx-usbaudio-in-v3.bin`.

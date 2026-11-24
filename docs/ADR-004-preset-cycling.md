@@ -12,3 +12,7 @@
 - User presets on the device: need protocol messages (list/send/delete a device preset slot), a small separate flash area (about 8 x 400 B, written rarely), and a decision about saving from the device (no gesture assigned).
 - The working configuration (power-up state) is saved by the existing debounced journal. Loading a preset overwrites the working configuration; there is no "undo".
 - Whether a 25 ms fade is enough to avoid an audible dip/click, and the flash-erase stall during a save right after a preset load, need listening/measurement on hardware.
+
+## Amendments (2026-11-24, zephyr_sp1fx v1-rc1)
+- **Volume is kept:** a device preset load keeps the current master volume (`controller_t.preset_keep_master`; VOL+/VOL- is a device setting). The factory presets' `master` (0.75) is still used by the companion when it applies a preset. Tempo and everything else still come from the preset; the sync on/off state is never touched.
+- **One Clean:** the device list is exactly the six factory presets (Dub Station, Boom Bap, House, Lo-Fi Tape, Ambient, Clean). The usbaudio bring-up images put an extra built-in "Clean" in front of the table, so Clean appeared twice there.

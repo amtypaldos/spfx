@@ -87,6 +87,12 @@ firmware/scripts/build_firmware.sh --app zephyr_tone --no-usb  # adds the app's 
 ```
 
 `zephyr_tone` (audio bring-up, quiet test tone) is described in `docs/BRINGUP_TONE.md`.
+
+**Integrated firmware:** `firmware/scripts/build_firmware.sh --app sp1fx` (and `--app sp1fx repro`)
+builds `firmware/app/zephyr_sp1fx` (docs/BRINGUP_SP1FX.md). Its overlay shortens `slot0` to
+0x20000-0xFCFFF and adds the settings partition 0xFD000-0xFEFFF (ADR-003); the app's one-line
+`check_image.args` (`--reserve 0xFD000:0xFF000`) is passed to `check_image.py` by the build
+script, which then also fails if any loadable byte lands in the settings pages.
 `repro` directories are now named `repro_<app>_{a,b}`.
 
 Equivalent manual build:
