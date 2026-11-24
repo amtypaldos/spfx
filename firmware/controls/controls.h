@@ -32,7 +32,7 @@ typedef enum {
 	GE_FN_TAP,        /* FN pressed and released alone */
 	GE_GLOBAL_BYPASS, /* PLAY tap */
 	GE_VOL,           /* arg = +1/-1 (with auto-repeat) */
-	GE_POWER_OFF,     /* FN held 1.5 s: return to bootloader */
+	GE_POWER_OFF,     /* FN held alone GESTURE_FN_LONG_MS: return to bootloader */
 	GE_CHAN_DOWN,     /* arg = slot: a channel button went down (for UI) */
 	GE_CHAN_UP,       /* arg = slot */
 	GE_CYCLE_PRESET   /* arg = +1/-1: FN + rocker (repeats while held) */
@@ -44,7 +44,11 @@ typedef struct {
 } gesture_event_t;
 
 #define GESTURE_TAP_MAX_MS 600u
-#define GESTURE_FN_LONG_MS 1500u
+/* FN held alone this long = power off (rc3: 3 s, was 1.5 s, which was hit by accident while
+ * cycling presets with FN + rocker). Any other button pressed during the same FN press
+ * cancels it for that press. */
+#define GESTURE_FN_LONG_MS 3000u
+#define GESTURE_FN_WARN_MS 1000u /* LED countdown during the last second (controller) */
 #define GESTURE_ROCKER_DELAY_MS 450u
 #define GESTURE_ROCKER_REPEAT_MS 200u
 #define GESTURE_VOL_DELAY_MS 400u

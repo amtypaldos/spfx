@@ -316,15 +316,61 @@ static void test_faders_set_wet_after_pickup(void)
 	CHECK(ui.to[0].need == -1); /* fader (0.9) is above logical (0.2): must move down */
 }
 
+static void setup_presets(void);
 static void test_power_off_gesture(void)
 {
 	setup(850);
-	hold(B(BTN_FN), 1400);
-	CHECK(!ui.power_off_request);
+	led_frame_t f;
+	/* FN alone: nothing until GESTURE_FN_LONG_MS (3 s); LED countdown in the last second */
+	hold(B(BTN_FN), GESTURE_FN_LONG_MS - GESTURE_FN_WARN_MS - 100);
+	CHECK(!ui.power_off_request && controller_poweroff_countdown(&ui, T) == 0);
 	hold(B(BTN_FN), 200);
+	CHECK(controller_poweroff_countdown(&ui, T) == 1);
+	controller_leds(&ui, T, &f);
+	CHECK(f.play[0] == 255 && f.play[1] == 0);
+	hold(B(BTN_FN), 600);
+	CHECK(!ui.power_off_request && controller_poweroff_countdown(&ui, T) >= 3);
+	hold(B(BTN_FN), 340); /* + the 2-tick debounce before FN counts as down */
 	CHECK(ui.power_off_request);
 	hold(0, 40);
 	CHECK(ui.mode == UI_PERFORM);
+	/* the old 1.5 s is no longer a power off */
+	setup(850);
+	hold(B(BTN_FN), 1600); hold(0, 40);
+	CHECK(!ui.power_off_request);
+}
+
+/* the owner's rc2 case: FN held while cycling presets; any other button in the same FN press
+ * cancels the power-off hold for that press */
+static void test_power_off_cancelled_by_combination(void)
+{
+	setup_presets();
+	/* FN down, wait 1.2 s, rocker tap, keep FN down 3 s more: no power off, no countdown */
+	hold(B(BTN_FN), 1200);
+	hold(B(BTN_FN) | B(BTN_FWD), 40);
+	hold(B(BTN_FN), 3000);
+	CHECK(!ui.power_off_request);
+	CHECK(controller_poweroff_countdown(&ui, T) == 0);
+	hold(B(BTN_FN), 80); hold(0, 80);
+	CHECK(ui.preset_idx == 0);  /* the rocker did its job */
+	/* FN + rocker held with auto-repeat for a long time */
+	hold(B(BTN_FN), 40); hold(B(BTN_FN) | B(BTN_REV), 4000); hold(B(BTN_FN), 3500); hold(0, 80);
+	CHECK(!ui.power_off_request);
+	/* FN + VOL (no FN function, but still a combination) */
+	hold(B(BTN_FN), 500); hold(B(BTN_FN) | B(BTN_VOLUP), 40); hold(B(BTN_FN), 3500); hold(0, 80);
+	CHECK(!ui.power_off_request);
+	/* FN + channel (edit mode), keep holding FN */
+	hold(B(BTN_FN), 500); hold(B(BTN_FN) | B(BTN_T2), 60); hold(B(BTN_FN), 3500); hold(0, 80);
+	CHECK(!ui.power_off_request);
+	/* FN + PLAY */
+	hold(B(BTN_FN), 500); hold(B(BTN_FN) | B(BTN_PLAY), 60); hold(B(BTN_FN), 3500); hold(0, 80);
+	CHECK(!ui.power_off_request);
+	/* a channel held with rocker while FN comes down later is a combination too */
+	hold(B(BTN_T1), 100); hold(B(BTN_T1) | B(BTN_FN), 3500); hold(0, 80);
+	CHECK(!ui.power_off_request);
+	/* and a clean FN-only hold afterwards still powers off */
+	hold(B(BTN_FN), GESTURE_FN_LONG_MS + 40);
+	CHECK(ui.power_off_request);
 }
 
 static void test_admission_error_pattern_and_rollback(void)
@@ -718,6 +764,7 @@ int main(void)
 	RUN(test_takeover_unit);
 	RUN(test_faders_set_wet_after_pickup);
 	RUN(test_power_off_gesture);
+	RUN(test_power_off_cancelled_by_combination);
 	RUN(test_admission_error_pattern_and_rollback);
 	RUN(test_led_performance);
 	RUN(test_led_select_and_edit);

@@ -328,9 +328,26 @@ static void vol_bar(float m, uint32_t now, uint8_t play[4])
 	}
 }
 
+int controller_poweroff_countdown(const controller_t *c, uint32_t now)
+{
+	const gesture_t *g = &c->gest;
+	if (!g->fn_down || g->fn_consumed || g->fn_long_sent) return 0;
+	uint32_t held = now - g->fn_t;
+	if (held + GESTURE_FN_WARN_MS < GESTURE_FN_LONG_MS) return 0;
+	uint32_t into = held - (GESTURE_FN_LONG_MS - GESTURE_FN_WARN_MS);
+	int lit = 1 + (int)(into * 4u / GESTURE_FN_WARN_MS);
+	return lit > 4 ? 4 : lit;
+}
+
 void controller_leds(const controller_t *c, uint32_t now, led_frame_t *o)
 {
 	leds_base(c, now, o);
+	/* power-off countdown has priority: the PLAY-side LEDs fill up during the last second */
+	int cd = controller_poweroff_countdown(c, now);
+	if (cd > 0) {
+		for (int i = 0; i < 4; i++) o->play[i] = i < cd ? 255 : 0;
+		return;
+	}
 	int showing_select = c->held_slot >= 0 && (c->selecting || now - c->held_since > 250u) && c->mode == UI_PERFORM;
 	if (c->vol_until != 0u && (int32_t)(c->vol_until - now) > 0 && !showing_select && now >= c->err_until)
 		vol_bar(c->eng->cfg.master, now, o->play);

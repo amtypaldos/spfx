@@ -93,6 +93,10 @@ int gesture_update(gesture_t *g, uint16_t mask, uint32_t now, gesture_event_t *e
 	if ((released & BTN_BIT(BTN_VOLDN)) && g->vol_dir == -1) g->vol_dir = 0;
 
 	/* ---- presses ---- */
+	/* any other button pressed while FN is down makes this FN press a combination:
+	 * never a tap, never the power-off hold (VOL and a rocker with a channel held
+	 * included, which set nothing else) */
+	if (g->fn_down && (pressed & (uint16_t)~BTN_BIT(BTN_FN))) g->fn_consumed = 1;
 	if (pressed & BTN_BIT(BTN_FN)) {
 		g->fn_down = 1;
 		g->fn_t = now;
