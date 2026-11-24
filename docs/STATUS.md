@@ -2,7 +2,45 @@
 
 Evidence key: **[HW]** observed on the owner's SP-1 (owner-run; see the hardware log). **[HOST]** verified by automated tests on a development Mac. **[SRC]** from upstream source/docs or our own build output. **[UNTESTED]** built but never run. **[TODO]** not started. The integrated image v1-rc1 has **not** been run on an SP-1.
 
-## v1-rc1: integrated firmware (2026-11-24) -- NOTHING OF THIS IMAGE IS HARDWARE-VERIFIED
+## v1-rc2 (2026-11-24): rc1 watchdog-reset fixes -- NOT RUN ON HARDWARE
+
+`sp1fx-v1-rc2.bin`, SHA-256 `3ccf3c8ed9fee5de1276e1f26034cd33dd52f893120aa0c6eee27654a2a8f250`,
+152,636 B, `check_image.py` PASS, reproducible, 0 warnings. Test plan: top of `docs/BRINGUP_SP1FX.md`.
+
+**rc1 hardware result [HW, owner-run, console read by the lead]:** watchdog resets (rr=2), dozens
+in a row, every ~6-20 s, with and without the companion, often after effect/preset changes.
+Crash records at the watchdog moment: thread `idle` (pc 0x31700 = WFI in `cpu_idle`) in most,
+`usbd` (`k_event_wait`) and `udc_nrfx` (`z_pend_curr`) in others [SRC: addr2line on a
+byte-identical rebuild of rc1]. Settings were written on nearly every boot (seq 41..48),
+127-195 ms per record; one boot showed an erase of 87 ms that completed.
+
+**Analysis [SRC, hypotheses ranked; none proven]:**
+1. All threads blocked at the watchdog moment => the control thread (only watchdog feeder) was
+   waiting for something that never came, not starved (starve=0, idle running). Its only
+   unbounded wait in rc1 was the SAADC `adc_read` (Zephyr `adc_context`: semaphore,
+   `K_FOREVER`), 2x every 8 ms. Every other wait there is bounded (I2C 500 ms timeout, flash,
+   sleeps, duck waits); there is no wait on the audio thread (`engine_config_settled` is only
+   polled). => rc2 reads the SAADC asynchronously with a 100 ms timeout. **Leading hypothesis.**
+   Why the SAADC interrupt would go missing with USB audio + flash writes running is not
+   known.
+2. Flash activity coinciding with the hangs: rc1 wrote a record on every boot (fader pickup
+   counted as a change; bug, fixed in `controller.c`, host-tested) and could erase with USB
+   running (87 ms CPU stall). => rc2: no boot write, dedup, >= 30 s between saves, no erase
+   with VBUS present.
+3. USB stack as a whole (owner's suspicion): no livelock found in Zephyr's CDC ACM / our
+   callbacks by inspection; the CDC TX path never waits (now the host-tested queue). The
+   crash records do not show a USB thread hogging the CPU. Not excluded: the rc2 stall
+   watcher records per-thread CPU shares, SOF rate and USB frame rate.
+4. A loaded config replayed at every boot: config is sanitised and admission-checked by the
+   engine at load (unchanged); rc2 adds a crash-loop breaker (2 early crashes in a row ->
+   factory defaults, journal neither loaded nor written).
+Host simulation [HOST]: preset changes + effect cycling + VOL + debounced saves for 10 min with
+the audio thread stopped: every control step returns, no erase is chosen, 16 records then
+saves wait. Stalled/slow USB host [HOST]: the TX queue never waits, drops whole frames only,
+the companion's connect burst (HELLO, 11 FX_DESC, STATE, SUBSCRIBE) fits the 4 KB queue with
+no host reading at all; reconnect starts in text mode and switches again with a separator.
+
+## v1-rc1: integrated firmware (2026-11-24) -- superseded by rc2 (resets on hardware)
 
 `firmware/app/zephyr_sp1fx` -> `~/spfx/flash-ready/sp1fx-v1-rc1.bin`, SHA-256
 `cf09092a75e575f643c869b8b7a8155f9b28ece42a70d8151b789c67bd20a9a8`, 144,864 B at 0x20000,
@@ -171,6 +209,7 @@ Next: owner runs fxprof -> replace the declared values with measured ones.
 - Minimal image: when USB is plugged in, FN-hold enters SYSTEM_OFF and the device may stay dark until FN is pressed or USB is replugged (Tape Looper soft-resets instead). Pins, PWM ownership of the LED pin, and watchdog-channel assumptions are unverified guesses from Tape Looper's source.
 
 ## Hardware log (owner-reported; no automated evidence)
+- 2026-11-24 (owner-run, console read by the lead): `sp1fx-v1-rc1.bin` resets by watchdog every ~6-20 s (see "v1-rc2" at the top). Superseded by rc2 (not yet run).
 - 2026-11-24: `sp1fx-min-heartbeat.bin` (SHA-256 18afab48...592667) flashed with Solderless to the spare unit; LED 1 blinks. This confirms: bootloader accepts an app linked at 0x20000, our reset/vector layout is valid, LED pin P0.29 is right.
 - 2026-11-24: `sp1fx-tone.bin` (SHA-256 87886d14...433f9): owner reports left channel low tone, right channel high tone, "sounds great". This confirms (owner-observed) the CS42L42/TAS2505 init, I2S slave clocking from the 3.072 MHz oscillator, and channel order. Not yet reported: which output was heard (speaker vs headphones), LEDs 2-4, serial status line, speaker mute on headphone insert, pop-free switching.
 - Finding from the tone build: `nfct-pins-as-gpios` in the board dts has no effect in Zephyr 4.3.1 (it is only read from `&uicr`). Making it effective would write UICR.NFCPINS (outside our image) and reset the chip: do not change without an explicit decision. P0.09 (TAS2505 reset) works as a GPIO because this unit's UICR already allows it.

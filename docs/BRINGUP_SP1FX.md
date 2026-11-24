@@ -1,4 +1,72 @@
-# SP-1 FX v1-rc1: integrated firmware bring-up
+# SP-1 FX v1: integrated firmware bring-up (rc2 current)
+
+## rc2 (2026-11-24): fixes for the rc1 watchdog resets -- NOT RUN ON HARDWARE
+
+| | |
+|---|---|
+| File | `~/spfx/flash-ready/sp1fx-v1-rc2.bin` (ELF for addr2line: `sp1fx-v1-rc2.elf`, same folder) |
+| SHA-256 | `3ccf3c8ed9fee5de1276e1f26034cd33dd52f893120aa0c6eee27654a2a8f250` (in `SHA256SUMS`) |
+| Size | 152,636 B at 0x20000, `check_image.py` PASS (incl. `--reserve`), two clean builds identical |
+
+**rc1 on hardware (owner):** watchdog resets (rr=2) every ~6-20 s, with or without the
+companion, often right after trying effects or presets. At the watchdog moment the running
+thread was `idle` (pc = WFI in `cpu_idle`) or a USB thread in its normal wait (`usbd`
+in `k_event_wait`, `udc_nrfx` in `z_pend_curr`): every thread was blocked, so the control
+thread (the only watchdog feeder) was waiting for something that never happened. Settings
+were written on almost every boot (seq rising), 127-195 ms per record.
+
+**What rc2 changes (each one small, and each aimed at a specific finding):**
+1. **No unbounded wait on the control thread.** rc1's only `K_FOREVER` wait there was the
+   SAADC read (`adc_read`, Zephyr `adc_context` waits forever for the conversion-done
+   interrupt), twice every 8 ms. rc2 starts a scan and collects it on the next tick
+   (`adc_read_async`); a scan that does not finish in 100 ms is counted (`adc_to=`) and the
+   controls freeze, but audio, USB and the watchdog keep running. *Leading hypothesis, not
+   proven.*
+2. **No settings write at boot, at most one per 30 s, and only if something changed.** In rc1
+   every fader pickup counted as a change, so each boot saved ~1.5 s after start; fixed in
+   the controller (a pickup at the stored value is not a change). Saves now skip when the
+   record would be identical (`dedup=`). SAVE_NOW and FN-hold power off still save at once.
+3. **No flash page erase while the USB cable is in** (an erase stalls the CPU and every USB/I2S
+   interrupt for ~85 ms; rc1 was the first image to do that). Erases happen on battery when
+   quiet, or at power off. SAVE_NOW answers "busy" if it would need an erase (the companion
+   shows "the device is busy, try again"); the change is saved at power off.
+4. **Crash-loop breaker.** If the last two boots both ended in a crash within 60 s of starting,
+   the device boots with factory defaults, does not load or write the saved settings, and
+   says `SAFE BOOT` in the `I` banner. A run that lasts 60 s resets the counter (next boot
+   loads the settings again). The counter lives in RAM: a full power loss resets it.
+5. **Pinning the next hang.** A stall watcher in the audio thread (clocked by I2S, so it works
+   even if the kernel timer were the problem) writes up to two `STALL[n]` lines into
+   retained RAM when the control loop has not run for 1.5 s and 3.5 s; the watchdog capture
+   adds `crumbs=` to the CRASH line. Printed after the next boot, in text mode.
+6. Console TX queue: the host-tested module (stalled host, separator, connect burst) is now
+   the one in the image; RX parsing is bounded to 512 B per tick.
+
+**rc2 test (do this before the stages below):**
+1. Flash rc2. Open the console (`screen`), companion closed. Report the `I` banner.
+2. Play music; do what crashed rc1: switch presets with FN+FWD/REV and cycle effects
+   (hold T2 + FWD) for 2-3 minutes. Then connect the companion and do the same for 2 minutes.
+3. If it resets: open `screen` again (companion closed) and copy **every** `CRASH` and
+   `STALL[...]` line plus the next `info`/`store` lines. If it does not reset but a
+   `STALL near miss` line appears, copy that.
+4. Either way report from the `info`/`store` lines: `stalls= stall_max_ms= adc_to=
+   adc_max_ms= saves= dedup= save_busy= safe= vbus=`.
+
+How to read the lines (for the lead):
+- `CRASH: ... crumbs=stage:S loop_ms:L stage_ms:M adc:0xA`: S = loop stage (1 top, 2 console,
+  3 adc, 4 controller, 5 proto_rx, 6 proto_tick, 7 store, 8 leds, 9 hp_i2c, 10 diag, 11 sleep,
+  12 flash_w, 13 flash_e, 14 wait_out, 15 poweroff); `up - L` = how long the loop had not run;
+  `up - M` = time in that stage; adc bit1 = a scan never finished, bits 8+ = timeouts.
+- `STALL[n] prev run: up= loop_age= stage=NAME(ms) main:off st=0x.. pc= lr= bt=... cur=...
+  cpu%o: <thread>=permille ... idle= sof/s= blk/s= usbf/s= con= txq= ... since_flash= vbus=`.
+  `st` is the control thread's scheduler state (0x02 = pending on a kernel object, 0x04 =
+  sleeping, 0x80 = ready but not running). `pc/lr/bt` are code addresses in the control
+  thread's stack: `arm-zephyr-eabi-addr2line -f -i -e sp1fx-v1-rc2.elf <addr>`. The thread
+  shares tell starvation (a USB thread near 1000) from blocking (idle near 1000); `sof/s`
+  ~1000 and `blk/s` ~750 mean USB and audio were still alive.
+
+---
+
+# rc1 (superseded by rc2; kept for reference)
 
 **Status: built, host-tested, NOT RUN ON HARDWARE.** Nothing in this image has been on an
 SP-1 yet. It combines parts that were hardware-verified separately (USB audio + engine v3,
