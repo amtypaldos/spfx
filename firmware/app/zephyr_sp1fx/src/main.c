@@ -1410,6 +1410,16 @@ static bool charging(void)
 	return (NRF_P0->IN & (1u << BQ_NCHG)) == 0u;
 }
 
+static batt_t g_batt;   /* rc6 fuel gauge (app_logic.h): fed from the SAADC battery channel */
+
+static uint8_t proto_batt_pct(void *uctx)
+{
+	ARG_UNUSED(uctx);
+	const int p = batt_shown(&g_batt);
+
+	return p < 0 ? 255u : (uint8_t)p;
+}
+
 static uint8_t proto_power_flags(void *uctx)
 {
 	ARG_UNUSED(uctx);
@@ -1472,16 +1482,22 @@ static void standby(void)
 		if (a == SB_OFF) {
 			system_off_now();
 		}
+		{
+			int16_t ar[SAADC_SCAN_CH];
+			const bool chg = charging();
+
+			if (saadc_scan_poll(t, ar)) {
+				batt_feed(&g_batt, ar[6], chg, usb && !chg, t);
+			}
+		}
 		if (down) {
 			controller_fill_leds(holdfill_count(held), &f);
 		} else {
 			controller_fill_leds(0, &f);
-			if (usb) {
-				/* 2.4 s triangle 8..90 while charging; steady 40 when done */
-				const uint32_t ph = t % 2400u;
-				const uint32_t tri = ph < 1200u ? ph : 2400u - ph;
-
-				f.play[0] = charging() ? (uint8_t)(8u + tri * 82u / 1200u) : 40u;
+			if (usb && batt_shown(&g_batt) >= 0) {
+				/* rc6 fuel gauge: 1..8 LEDs (PLAY-side, then T1..T4), the top one pulsing
+				 * while charging, all steady when the charger reports done */
+				batt_leds(batt_shown(&g_batt), charging(), t, f.play, f.track);
 			}
 		}
 		controls_hw_leds(f.track, f.play);
@@ -1865,7 +1881,7 @@ static void log_diag_step(uint32_t now)
 	case 0:
 		a_ok = snap_read(&a_seq, &a_pub, &a, sizeof(a));
 		con_printf("D t=%u preset=%d:%s fx=%s%s,%s%s,%s%s,%s%s cpu%%=%u.%u/%u.%u blk%%=%u.%u/%u.%u%s "
-			   "spk>85=%u win=%u.%u win_max=%u.%u shed=0x%x f=%u vol=%d out=%s\r\n",
+			   "spk>85=%u win=%u.%u win_max=%u.%u shed=0x%x f=%u vol=%d out=%s batt=%d%%\r\n",
 			   now / 1000u, ui.preset_idx + 1, preset_name(ui.preset_idx),
 			   fxs(0), eng.cfg.bypass[0] ? "(b)" : "", fxs(1), eng.cfg.bypass[1] ? "(b)" : "",
 			   fxs(2), eng.cfg.bypass[2] ? "(b)" : "", fxs(3), eng.cfg.bypass[3] ? "(b)" : "",
@@ -1876,7 +1892,8 @@ static void log_diag_step(uint32_t now)
 			   pct10(eng.diag.ovl_last_mean) / 10, pct10(eng.diag.ovl_last_mean) % 10,
 			   pct10(ovl_period_max) / 10, pct10(ovl_period_max) % 10,
 			   eng.diag.shed_mask, eng.diag.forced_bypass, idb(vol_master_db(eng.cfg.master)),
-			   g_out_mode == OUT_MODE_LINE ? "LINE" : g_out_mode == OUT_MODE_LOUD ? "LOUD" : "hp");
+			   g_out_mode == OUT_MODE_LINE ? "LINE" : g_out_mode == OUT_MODE_LOUD ? "LOUD" : "hp",
+		   batt_shown(&g_batt));
 		ovl_period_max = 0;
 		break;
 	case 1: {
@@ -1963,7 +1980,7 @@ static void log_diag_step(uint32_t now)
 			   "write_ms_max=%u erase_ms_max=%u deferred=%u dirty=%d pending=%d dedup=%u safe=%d "
 			   "events=%u tweaks=%u load_defer=%u job_ms_max=%u out=%s | "
 			   "ctl ticks=%u scans=%u scan_age_ms=%u adc_to=%u start_fail=%u stop_fail=%u "
-			   "ppi_cleared=%u saadc_was_on=%u batt_raw=%d | "
+			   "ppi_cleared=%u saadc_was_on=%u batt_raw=%d batt=%d%% (%d mV smoothed, uncalibrated) | "
 			   "sync on=%u hw=%u ticks=%u pulses=%u starts=%u | con drops=%u frames_drop=%u "
 			   "rx_drop=%u ev_drop=%u rx_frames=%u bad=%u\r\n",
 			   store_ok ? 1 : 0, st_load_rc, (unsigned int)store.seq, store.active_page,
@@ -1976,7 +1993,8 @@ static void log_diag_step(uint32_t now)
 		   (unsigned int)g_ctl_ticks, (unsigned int)g_ctl_scans,
 			   (unsigned int)sst.age_ms, (unsigned int)sst.timeouts, (unsigned int)sst.start_fail,
 			   (unsigned int)sst.stop_fail, (unsigned int)sst.ppi_cleared,
-			   (unsigned int)sst.was_enabled, (int)g_batt_raw, proto.sync_on,
+			   (unsigned int)sst.was_enabled, (int)g_batt_raw, batt_shown(&g_batt),
+		   g_batt.have ? (int)g_batt.mv : -1, proto.sync_on,
 			   g_sync_hw_init, (unsigned int)g_sync_ticks, (unsigned int)g_sync_pulses,
 			   (unsigned int)g_sync_starts, (unsigned int)ctx.text_drops,
 			   (unsigned int)ctx.frame_drops, (unsigned int)rx_drops, (unsigned int)ev_rl.dropped,
@@ -2014,6 +2032,8 @@ int main(void)
 	/* controls: rail on, LEDs dark (PWM0/PWM1), SAADC channels */
 	hw_rc = controls_hw_init();
 	charger_init();
+	saadc_scan_init();   /* also needed by the charge standby's fuel gauge */
+	batt_init(&g_batt);
 	feed_wdt();
 	{
 		const int poff = crashdump_take_poweroff_flag();
@@ -2023,7 +2043,6 @@ int main(void)
 			standby();   /* returns only after FUNCTION was held 4 s */
 		}
 	}
-	saadc_scan_init();
 	feed_wdt();
 
 	(void)gpio_pin_configure_dt(&cs42_rst, GPIO_OUTPUT_ACTIVE);
@@ -2085,7 +2104,7 @@ int main(void)
 	const proto_config_t pc = {
 		.eng = &eng, .ctl = &ui, .sync = NULL, .deb = NULL, .tx = proto_tx,
 		.save = proto_save_now, .ctx = NULL, .fw = FW_VERSION, .block = BLK_FRAMES,
-		.bpm = boot_d.bpm, .sync_on = boot_d.sync_on, .power_flags = proto_power_flags,
+		.bpm = boot_d.bpm, .sync_on = boot_d.sync_on, .power_flags = proto_power_flags, .batt_pct = proto_batt_pct,
 		.on_host_change = proto_host_change, .out_mode = g_out_mode,
 	};
 
@@ -2236,6 +2255,11 @@ int main(void)
 				fv[i] = fader_update(&fad[i], adc_raw[2 + i]);
 			}
 			g_batt_raw = adc_raw[6];
+			{
+				const bool chg = charging();
+
+				batt_feed(&g_batt, adc_raw[6], chg, usb_power() && !chg, now);
+			}
 			g_lad_raw[0] = adc_raw[0];
 			g_lad_raw[1] = adc_raw[1];
 			g_ctl_scans++;
@@ -2324,11 +2348,8 @@ int main(void)
 		led_frame_t f;
 
 		controller_leds(&ui, now, &f);
-		/* charging while running: a short dim blip on the 4th PLAY-side LED every 4 s, only
-		 * when nothing else uses that LED */
-		if (charging() && f.play[3] == 0u && (now % 4000u) < 120u) {
-			f.play[3] = 40u;
-		}
+		/* rc6 (owner): no charging indication on the LEDs while running; the fuel gauge is
+		 * shown only in the charge standby (off + USB). Console/companion still report it. */
 		controls_hw_leds(f.track, f.play);
 		/* output-level LEDs read diag.out_peak: let it decay (half-life ~110 ms) */
 		eng.diag.out_peak *= 0.95f;
