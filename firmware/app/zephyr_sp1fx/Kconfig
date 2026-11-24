@@ -9,7 +9,7 @@ config SP1FX_USB_CONSOLE
 
 config SP1FX_FW_VERSION
 	string "Firmware version string (HELLO_RSP, console banner)"
-	default "sp1fx-v1-rc1"
+	default "sp1fx-v1-rc2"
 
 config SP1FX_OUT_TRIM_DB
 	int "Fixed digital output trim after the engine limiter (dB, <= 0)"

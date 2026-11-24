@@ -81,6 +81,9 @@
 #define FN_RELEASE_MS    60
 #define HP_POLL_MS       250
 #define DETAIL_EVERY     5        /* detail lines every 5th diag period */
+#define ADC_TIMEOUT_MS   100      /* a SAADC scan normally takes < 1 ms */
+#define SAVE_GAP_MS      30000u   /* rc2: at most one settings save per 30 s, none in the
+				   * first 30 s after boot (power off / SAVE_NOW excepted) */
 
 /* ---------------------------- audio constants ---------------------------- */
 #define FS_HZ            48000
@@ -308,6 +311,8 @@ static void render_block(int16_t *dst, uint32_t *eng_cycles, float *ipk, float *
 	g_out_sat += ua_f32_to_s16(out_l, out_r, dst, BLK_FRAMES, trim_gain);
 }
 
+static void sup_audio_tick(void);   /* stall watcher, called from the audio thread */
+
 static K_THREAD_STACK_DEFINE(audio_stack, AUDIO_STACK_SIZE);
 static struct k_thread audio_tcb;
 
@@ -378,6 +383,7 @@ static void audio_thread(void *a, void *b, void *c)
 		(void)engine_overload_feed(&eng, bc, OVERLOAD_LIMIT_CYC);
 		quiet_feed(&g_quiet, ipk, opk);
 		g_frames += BLK_FRAMES;
+		sup_audio_tick();
 
 		if (eng.diag.cfg_applies != applies0 || eng.diag.slot_inits != inits0) {
 			g_apply_blocks++;
@@ -540,13 +546,19 @@ static const struct uac2_ops uac2_ops = {
  * callback; a line or frame that does not fit is dropped whole. RX: bytes into rx_rb, parsed
  * by the protocol on the control thread. */
 static const struct device *const cdc = DEVICE_DT_GET(DT_NODELABEL(cdc_acm_uart0));
-RING_BUF_DECLARE(con_rb, 4096);
+/* TX: app_logic.h contx_t (whole-message queue, never waits, 0x00 before the first binary
+ * frame; host-tested with a stalled host). Producer: control thread; consumer: cdc_cb. */
+#define CON_TX_BYTES 4096u
+#define RX_DRAIN_MAX 512u      /* protocol bytes parsed per 8 ms tick (rest: next tick) */
+static uint8_t con_buf[CON_TX_BYTES];
+static contx_t ctx;
 RING_BUF_DECLARE(rx_rb, 1024);
 static struct k_spinlock con_lock, rx_lock;
 static bool usb_ok;
 static int usb_rc = 1;
-static uint32_t con_drops, frame_drops, rx_drops;
-static con_mode_t conm;
+static uint32_t rx_drops, cdc_tx_bytes, cdc_rx_bytes;
+#define conm (ctx.m)
+static volatile uint32_t g_binary_since_ms;    /* console switched to binary at */
 static ratelimit_t ev_rl;
 static proto_t proto;
 
@@ -567,19 +579,21 @@ static void cdc_cb(const struct device *dev, void *user)
 
 			k_spin_unlock(&rx_lock, key);
 			rx_drops += (uint32_t)n - put;
+			cdc_rx_bytes += (uint32_t)n;
 		}
 	}
 	if (uart_irq_tx_ready(dev)) {
 		k_spinlock_key_t key = k_spin_lock(&con_lock);
-		uint8_t *p;
-		uint32_t n = ring_buf_get_claim(&con_rb, &p, 64);
+		const uint8_t *p;
+		uint32_t n = txq_peek(&ctx.q, &p, 64);
 		int w = (n > 0u) ? uart_fifo_fill(dev, p, (int)n) : 0;
 
 		if (w < 0) {
 			w = 0;
 		}
-		(void)ring_buf_get_finish(&con_rb, (uint32_t)w);
-		bool empty = ring_buf_is_empty(&con_rb);
+		txq_consume(&ctx.q, (uint32_t)w);
+		cdc_tx_bytes += (uint32_t)w;
+		bool empty = txq_used(&ctx.q) == 0u;
 
 		k_spin_unlock(&con_lock, key);
 		if (empty) {
@@ -622,43 +636,39 @@ static bool port_dtr(void)
 	return dtr != 0u;
 }
 
-/* whole or nothing */
-static bool con_put(const uint8_t *s, uint32_t len)
-{
-	if (len == 0u || !usb_ok) {
-		return false;
-	}
-	k_spinlock_key_t key = k_spin_lock(&con_lock);
-	bool fits = ring_buf_space_get(&con_rb) >= len;
-
-	if (fits) {
-		(void)ring_buf_put(&con_rb, s, len);
-	}
-	k_spin_unlock(&con_lock, key);
-	if (fits) {
-		uart_irq_tx_enable(cdc);
-	}
-	return fits;
-}
-
-/* Re-evaluate the port mode; on the switch to binary send the 0x00 separator first. */
+/* Re-evaluate the port mode (contx sends the 0x00 separator on the switch to binary). */
 static void conm_poll(void)
 {
-	if (conmode_update(&conm, port_dtr() ? 1 : 0, proto.rx_frames)) {
-		const uint8_t z = 0;
+	const int dtr = port_dtr() ? 1 : 0;
+	k_spinlock_key_t key = k_spin_lock(&con_lock);
 
-		(void)con_put(&z, 1);
+	contx_poll(&ctx, dtr, proto.rx_frames);
+	const bool kick = txq_used(&ctx.q) != 0u;
+
+	if (!conmode_binary_ok(&ctx.m)) {
+		g_binary_since_ms = 0u;
+	} else if (g_binary_since_ms == 0u) {
+		g_binary_since_ms = k_uptime_get_32() | 1u;
+	}
+
+	k_spin_unlock(&con_lock, key);
+	if (kick && usb_ok) {
+		uart_irq_tx_enable(cdc);
 	}
 }
 
-/* text: only in text mode */
+/* text: only in text mode; whole line or dropped (never waits) */
 static void con_write(const char *s, int len)
 {
-	if (len <= 0 || !conmode_text_ok(&conm)) {
+	if (len <= 0 || !usb_ok) {
 		return;
 	}
-	if (!con_put((const uint8_t *)s, (uint32_t)len)) {
-		con_drops++;
+	k_spinlock_key_t key = k_spin_lock(&con_lock);
+	const int ok = contx_text(&ctx, (const uint8_t *)s, (uint32_t)len);
+
+	k_spin_unlock(&con_lock, key);
+	if (ok) {
+		uart_irq_tx_enable(cdc);
 	}
 }
 
@@ -694,23 +704,28 @@ static void con_printf(const char *fmt, ...)
 	} while (0)
 
 /* protocol tx: only in binary mode (a frame before the switch would corrupt text) */
-static void proto_tx(void *ctx, const uint8_t *bytes, size_t n)
+static void proto_tx(void *c, const uint8_t *bytes, size_t n)
 {
-	ARG_UNUSED(ctx);
+	ARG_UNUSED(c);
 	conm_poll();   /* the request that caused this answer may be the very first frame */
-	if (!conmode_binary_ok(&conm)) {
+	if (!usb_ok) {
 		return;
 	}
-	if (!con_put(bytes, (uint32_t)n)) {
-		frame_drops++;
+	k_spinlock_key_t key = k_spin_lock(&con_lock);
+	const int ok = contx_frame(&ctx, bytes, (uint32_t)n);
+
+	k_spin_unlock(&con_lock, key);
+	if (ok) {
+		uart_irq_tx_enable(cdc);
 	}
 }
 
 static void rx_drain(void)
 {
 	uint8_t b[64];
+	uint32_t total = 0;
 
-	for (;;) {
+	while (total < RX_DRAIN_MAX) {
 		k_spinlock_key_t key = k_spin_lock(&rx_lock);
 		uint32_t n = ring_buf_get(&rx_rb, b, sizeof(b));
 
@@ -718,8 +733,39 @@ static void rx_drain(void)
 		if (n == 0u) {
 			break;
 		}
+		total += n;
 		proto_rx(&proto, b, n);
 	}
+}
+
+/* ------------------------------ breadcrumbs ------------------------------ */
+/* Where the control thread (the only watchdog feeder) is. Read by the stall supervisor. */
+enum {
+	ST_BOOT = 0, ST_TOP, ST_CONSOLE, ST_ADC, ST_CONTROLLER, ST_PROTO_RX, ST_PROTO_TICK,
+	ST_STORE, ST_LEDS, ST_HP_I2C, ST_DIAG, ST_SLEEP, ST_FLASH_W, ST_FLASH_E, ST_WAIT_OUT,
+	ST_POWEROFF, ST_COUNT
+};
+static const char *const stage_name[ST_COUNT] = {
+	"boot", "top", "console", "adc", "controller", "proto_rx", "proto_tick", "store", "leds",
+	"hp_i2c", "diag", "sleep", "flash_w", "flash_e", "wait_out", "poweroff"
+};
+static volatile uint8_t g_stage;
+static volatile uint32_t g_stage_ms;           /* when g_stage was entered */
+static volatile uint32_t g_loop_ms;            /* last pass through the top of the loop */
+static volatile uint32_t g_flash_end_ms;       /* end of the last flash write/erase */
+static volatile uint32_t g_flash_ops;
+static k_tid_t g_main_tid;
+/* copied into the crash record by the watchdog capture (crashdump_set_crumbs):
+ * [0] stage, [1] uptime of the last loop pass, [2] uptime the stage was entered,
+ * [3] SAADC: bit0 scan running, bit1 scan stuck, bits 8.. timeouts */
+static volatile uint32_t g_crumbs[CRASHDUMP_CRUMBS];
+
+static inline void stage(uint8_t s)
+{
+	g_stage = s;
+	g_stage_ms = k_uptime_get_32();
+	g_crumbs[0] = s;
+	g_crumbs[2] = g_stage_ms;
 }
 
 /* ------------------------- watchdog / power ------------------------------ */
@@ -742,10 +788,14 @@ static void wait_fed(int ms)
 
 static void wait_silent(void)
 {
+	const uint8_t prev = g_stage;
+
+	stage(ST_WAIT_OUT);
 	for (int t = 0; t < 10 && !g_gain_zero; t++) {
 		wait_fed(10);
 	}
 	wait_fed(15);
+	stage(prev);
 }
 
 static bool cs42_ok, tas_ok, cs42_cfg_ok, tas_cfg_ok;
@@ -818,9 +868,9 @@ static uint32_t cfg_flash_addr(uint32_t page, uint32_t off, uint32_t len)
 	return a;
 }
 
-static int fl_read(void *ctx, uint32_t page, uint32_t off, void *buf, uint32_t len)
+static int fl_read(void *uctx, uint32_t page, uint32_t off, void *buf, uint32_t len)
 {
-	ARG_UNUSED(ctx);
+	ARG_UNUSED(uctx);
 	const uint32_t a = cfg_flash_addr(page, off, len);
 
 	if (a == 0u) {
@@ -831,9 +881,9 @@ static int fl_read(void *ctx, uint32_t page, uint32_t off, void *buf, uint32_t l
 
 /* Chunked: each flash_write stalls the CPU for <= 2 x 41 us (nRF52840 tWRITE max per word);
  * the sleep between chunks lets the audio thread, I2S and USB interrupts run. */
-static int fl_write(void *ctx, uint32_t page, uint32_t off, const void *buf, uint32_t len)
+static int fl_write(void *uctx, uint32_t page, uint32_t off, const void *buf, uint32_t len)
 {
-	ARG_UNUSED(ctx);
+	ARG_UNUSED(uctx);
 	const uint32_t a = cfg_flash_addr(page, off, len);
 
 	if (a == 0u || (a & 3u) || (len & 3u)) {
@@ -841,18 +891,27 @@ static int fl_write(void *ctx, uint32_t page, uint32_t off, const void *buf, uin
 	}
 	const int64_t t0 = k_uptime_get();
 	const uint8_t *p = buf;
+	const uint8_t prev = g_stage;
+
+	stage(ST_FLASH_W);
+	g_flash_ops++;
 
 	for (uint32_t i = 0; i < len; i += FLASH_CHUNK) {
 		const uint32_t n = MIN(FLASH_CHUNK, len - i);
 		int rc = flash_write(flash_dev, (off_t)(a + i), p + i, n);
 
 		if (rc != 0) {
+			g_flash_end_ms = k_uptime_get_32();
+			stage(prev);
 			return rc;
 		}
 		feed_wdt();
 		k_usleep(FLASH_GAP_US);
 	}
 	const uint32_t ms = (uint32_t)(k_uptime_get() - t0);
+
+	g_flash_end_ms = k_uptime_get_32();
+	stage(prev);
 
 	st_write_ms_max = MAX(st_write_ms_max, ms);
 	return 0;
@@ -862,14 +921,18 @@ static int fl_write(void *ctx, uint32_t page, uint32_t off, const void *buf, uin
  * (nRF52840 tERASEPAGE; Zephyr's nRF flash driver without radio sync erases in one blocking
  * NVMC operation). Only reached when the scheduler allows it (quiet audio), at power-off or
  * on SAVE_NOW; the output is ducked to silence first in every case. */
-static int fl_erase(void *ctx, uint32_t page)
+static int fl_erase(void *uctx, uint32_t page)
 {
-	ARG_UNUSED(ctx);
+	ARG_UNUSED(uctx);
 	const uint32_t a = cfg_flash_addr(page, 0u, STORE_PAGE_BYTES);
 
 	if (a == 0u || (a % STORE_PAGE_BYTES) != 0u) {
 		return -1;
 	}
+	const uint8_t prev = g_stage;
+
+	stage(ST_FLASH_E);
+	g_flash_ops++;
 	engine_set_duck(&eng, 1);
 	wait_fed(30);                      /* engine duck: ~20 ms to silence */
 	const uint32_t err0 = g_err, und0 = out_cons.underruns;
@@ -881,8 +944,10 @@ static int fl_erase(void *ctx, uint32_t page)
 	feed_wdt();
 	const uint32_t ms = (uint32_t)(k_uptime_get() - t0);
 
+	g_flash_end_ms = k_uptime_get_32();
 	wait_fed(10);
 	engine_set_duck(&eng, 0);
+	stage(prev);
 	st_erases++;
 	st_erase_ms_max = MAX(st_erase_ms_max, ms);
 	EV_PRINTF("FLASH erase page 0x%05x rc=%d took %u ms (ducked) i2s_err+%u usb_under+%u\r\n",
@@ -890,6 +955,20 @@ static int fl_erase(void *ctx, uint32_t page)
 		  (unsigned int)(out_cons.underruns - und0));
 	return rc;
 }
+
+/* USB cable present (VBUS). rc2: no flash page erase while it is: the ~85 ms CPU stall of an
+ * erase is the one thing rc1 did with USB running that the stable usbaudio images never did,
+ * and is the leading (unproven) suspect for the rc1 watchdog resets with the companion. */
+static bool usb_vbus(void)
+{
+	return (NRF_POWER->USBREGSTATUS & POWER_USBREGSTATUS_VBUSDETECT_Msk) != 0u;
+}
+static uint32_t st_busy;   /* SAVE_NOW answered "busy" */
+static uint32_t st_dedup;  /* due saves skipped: nothing differs from the last saved record */
+static uint32_t st_last_save_ms;          /* boot time, then the last write */
+static uint8_t st_last_rec[STORE_RECORD_BYTES];
+static uint16_t st_last_len;
+static bool safe_boot;                    /* crash-loop breaker: journal not used this run */
 
 static void cur_data(store_data_t *d)
 {
@@ -905,24 +984,43 @@ static int do_save(const char *why)
 	if (!store_ok) {
 		return -1;
 	}
+	if (safe_boot) {
+		return -1;   /* never overwrite the journal from a crash-loop safe boot */
+	}
 	cur_data(&d);
+	static uint8_t enc[STORE_RECORD_BYTES];
+	const uint16_t n = store_encode(&d, enc, sizeof(enc));
+
+	if (n != 0u && n == st_last_len && memcmp(enc, st_last_rec, n) == 0) {
+		st_dedup++;   /* identical to what is on flash: no write */
+		return 0;
+	}
 	const int64_t t0 = k_uptime_get();
 	int rc = store_save(&store, &d);
 
 	if (rc == 0) {
 		st_saves++;
+		memcpy(st_last_rec, enc, n);
+		st_last_len = n;
 	} else {
 		st_errors++;
 	}
+	st_last_save_ms = k_uptime_get_32();
 	EV_PRINTF("SAVE (%s) rc=%d seq=%u page=%d slot=%d took %u ms\r\n", why, rc,
 		  (unsigned int)store.seq, store.active_page, store.next_slot - 1,
 		  (unsigned int)(k_uptime_get() - t0));
 	return rc;
 }
 
-static int proto_save_now(void *ctx)
+static int proto_save_now(void *uctx)
 {
-	ARG_UNUSED(ctx);
+	ARG_UNUSED(uctx);
+	if (store_ok && usb_vbus() && store_save_needs_erase(&store)) {
+		/* would erase with USB running: keep it pending (power off saves it) */
+		ssched.pending = 1;
+		st_busy++;
+		return PR_BUSY;
+	}
 	int rc = do_save("SAVE_NOW");
 
 	if (rc == 0) {
@@ -934,11 +1032,15 @@ static int proto_save_now(void *ctx)
 
 static void storage_tick(uint32_t now)
 {
-	if (!store_ok) {
+	if (!store_ok || safe_boot) {
 		return;
 	}
-	const int due = store_debounce_due(&deb, now);
-	const int quiet = quiet_ok(&g_quiet, QUIET_BLOCKS) && engine_config_settled(&eng);
+	/* rc2: nothing in the first 30 s after boot and at most one save per 30 s (the debounce
+	 * keeps the change marked dirty meanwhile) */
+	const int due = (now - st_last_save_ms >= SAVE_GAP_MS) ? store_debounce_due(&deb, now) : 0;
+	/* "quiet" for the scheduler = an erase is allowed: silent audio AND no USB cable (rc2) */
+	const int quiet = quiet_ok(&g_quiet, QUIET_BLOCKS) && engine_config_settled(&eng) &&
+			  !usb_vbus();
 
 	/* store_*_needs_erase read flash (cheap reads, cached for the spare page) */
 	const save_action_t act = save_sched_next(&ssched, now, due,
@@ -1065,9 +1167,9 @@ static ladder_t lad1, lad2;
 static fader_t fad[4];
 static int hw_rc = 1;
 
-static int fill_factory(void *ctx, int idx, store_data_t *out)
+static int fill_factory(void *uctx, int idx, store_data_t *out)
 {
-	ARG_UNUSED(ctx);
+	ARG_UNUSED(uctx);
 	if (idx < 0 || idx >= FACTORY_PRESET_COUNT) {
 		return -1;
 	}
@@ -1129,9 +1231,179 @@ static unsigned int stack_used(k_tid_t t, unsigned int *size)
 	return *size - (unsigned int)unused;
 }
 
+/* ---------------------------- stall supervisor ---------------------------- */
+/* The audio thread (clocked by I2S blocks, not by the kernel timer) checks every 100 ms that the control loop is making
+ * progress. After 1.5 s and again after 3.5 s without progress (the watchdog resets at ~4 s)
+ * it writes a one-line snapshot into retained RAM (crashdump_stall_save): loop stage and how
+ * long it has been there, the control thread's scheduler state, saved PC/LR and return
+ * addresses found on its stack (addr2line them), CPU share of every thread over the last
+ * 0.5 s, USB SOF/audio/USB-frame rates, console mode and queue, last protocol request, time
+ * since the last flash operation. It never feeds the watchdog. */
+#define SUP_MS        100u
+#define SUP_WIN_MS    500u
+#define STALL1_MS     1500u
+#define STALL2_MS     3500u
+#define SUP_THREADS   10
+
+static struct {
+	k_tid_t tid;
+	const char *name;
+	uint64_t prev, cur;
+} sup_thr[SUP_THREADS];
+static int sup_n;
+static uint64_t sup_tot_prev, sup_tot_cur, sup_idle_prev, sup_idle_cur;
+static uint32_t sup_sof_prev, sup_sof_cur, sup_blk_prev, sup_blk_cur, sup_fin_prev, sup_fin_cur;
+static uint32_t sup_ticks;
+static uint8_t sup_snaps;
+static volatile uint8_t g_stall_resolved;
+static volatile uint32_t g_stall_max_ms, g_stall_count;
+static char sup_line[CRASHDUMP_STALL_SLOTS][CRASHDUMP_STALL_LEN];
+
+static void sup_add_thread(const struct k_thread *t, void *user)
+{
+	ARG_UNUSED(user);
+	if (sup_n < SUP_THREADS) {
+		sup_thr[sup_n].tid = (k_tid_t)t;
+		sup_thr[sup_n].name = k_thread_name_get((k_tid_t)t);
+		sup_n++;
+	}
+}
+
+static void sup_sample(void)
+{
+	k_thread_runtime_stats_t st;
+
+	for (int i = 0; i < sup_n; i++) {
+		sup_thr[i].prev = sup_thr[i].cur;
+		if (k_thread_runtime_stats_get(sup_thr[i].tid, &st) == 0) {
+			sup_thr[i].cur = st.execution_cycles;
+		}
+	}
+	sup_tot_prev = sup_tot_cur;
+	sup_idle_prev = sup_idle_cur;
+	if (k_thread_runtime_stats_all_get(&st) == 0) {
+		sup_tot_cur = st.execution_cycles;
+		sup_idle_cur = st.idle_cycles;
+	}
+	sup_sof_prev = sup_sof_cur;
+	sup_sof_cur = g_sof_count;
+	sup_blk_prev = sup_blk_cur;
+	sup_blk_cur = g_blocks;
+	sup_fin_prev = sup_fin_cur;
+	sup_fin_cur = g_usb_frames_in;
+}
+
+static int bt_scan(const uint32_t *sp, uint32_t *out, int max)
+{
+	const uintptr_t lo = g_main_tid->stack_info.start;
+	const uintptr_t hi = lo + g_main_tid->stack_info.size;
+	int n = 0;
+
+	if ((uintptr_t)sp < lo || (uintptr_t)sp >= hi) {
+		return 0;
+	}
+	for (const uint32_t *w = sp + 8; (uintptr_t)w < hi && n < max; w++) {
+		const uint32_t v = *w;
+
+		if ((v & 1u) && v >= 0x20000u && v < 0xFD000u) {
+			out[n++] = v;
+		}
+	}
+	return n;
+}
+
+static void sup_snapshot(int slot, uint32_t now, uint32_t age)
+{
+	char *b = sup_line[slot];
+	const size_t cap = CRASHDUMP_STALL_LEN;
+	const k_tid_t cur = k_current_get();
+	const bool main_cur = (cur == g_main_tid);
+	const uint32_t *frame = NULL;
+	uint32_t bt[6] = { 0 };
+
+	if (main_cur && (SCB->ICSR & SCB_ICSR_RETTOBASE_Msk) != 0u) {
+		frame = (const uint32_t *)__get_PSP();
+	} else if (!main_cur) {
+		frame = (const uint32_t *)g_main_tid->callee_saved.psp;
+	}
+	const int nbt = frame ? bt_scan(frame, bt, 6) : 0;
+	const char *cn = k_thread_name_get(cur);
+	int len = snprintk(b, cap, "up=%u loop_age=%u stage=%s(%u ms) main:%s st=0x%02x pc=%08x lr=%08x "
+			   "bt=%x,%x,%x,%x,%x,%x cur=%s cpu%%o:",
+			   now, age, stage_name[g_stage < ST_COUNT ? g_stage : 0],
+			   now - g_stage_ms, main_cur ? "RUN" : "off",
+			   (unsigned int)g_main_tid->base.thread_state,
+			   frame ? (unsigned int)frame[6] : 0u, frame ? (unsigned int)frame[5] : 0u,
+			   nbt > 0 ? bt[0] : 0u, nbt > 1 ? bt[1] : 0u, nbt > 2 ? bt[2] : 0u,
+			   nbt > 3 ? bt[3] : 0u, nbt > 4 ? bt[4] : 0u, nbt > 5 ? bt[5] : 0u,
+			   cn ? cn : "?");
+	const uint64_t dt = sup_tot_cur - sup_tot_prev;
+
+	for (int i = 0; i < sup_n && len > 0 && (size_t)len < cap; i++) {
+		const uint64_t d = sup_thr[i].cur - sup_thr[i].prev;
+		const char *nm = sup_thr[i].name ? sup_thr[i].name : "?";
+
+		len += snprintk(b + len, cap - (size_t)len, " %.6s=%u", nm,
+				dt ? (unsigned int)(d * 1000u / dt) : 0u);
+	}
+	if (len > 0 && (size_t)len < cap) {
+		len += snprintk(b + len, cap - (size_t)len,
+				" idle=%u sof/s=%u blk/s=%u usbf/s=%u con=%s txq=%u fdrop=%u rx=%u last=%02x "
+				"flash_ops=%u since_flash=%u bin_for=%u vbus=%d",
+				dt ? (unsigned int)((sup_idle_cur - sup_idle_prev) * 1000u / dt) : 0u,
+				(sup_sof_cur - sup_sof_prev) * 1000u / SUP_WIN_MS,
+				(sup_blk_cur - sup_blk_prev) * 1000u / SUP_WIN_MS,
+				(sup_fin_cur - sup_fin_prev) * 1000u / SUP_WIN_MS,
+				conmode_binary_ok(&ctx.m) ? "bin" : (conmode_text_ok(&ctx.m) ? "text" : "closed"),
+				(unsigned int)txq_used(&ctx.q), (unsigned int)ctx.frame_drops,
+				(unsigned int)proto.rx_frames, proto.last_type, (unsigned int)g_flash_ops,
+				g_flash_ops ? now - g_flash_end_ms : 0u,
+				g_binary_since_ms ? now - g_binary_since_ms : 0u, usb_vbus() ? 1 : 0);
+	}
+	crashdump_stall_save(slot, b);
+}
+
+static volatile uint8_t g_sup_on;
+static uint32_t sup_blocks;
+
+/* From the audio thread once per block (I2S-clocked: keeps working even if the kernel's
+ * timer or every timed wait were the thing that broke); acts every 75 blocks = 100 ms. */
+static void sup_audio_tick(void)
+{
+	if (!g_sup_on || ++sup_blocks < SUP_MS * BLOCKS_PER_S / 1000u) {
+		return;
+	}
+	sup_blocks = 0;
+	const uint32_t now = k_uptime_get_32();
+	const uint32_t age = now - g_loop_ms;
+
+	/* keep the last complete 0.5 s window while stalled (the snapshot describes the stall) */
+	if (++sup_ticks >= SUP_WIN_MS / SUP_MS) {
+		sup_ticks = 0;
+		sup_sample();
+	}
+	if (age > g_stall_max_ms) {
+		g_stall_max_ms = age;
+	}
+	if (age >= STALL1_MS && sup_snaps == 0u) {
+		sup_snapshot(0, now, age);
+		sup_snaps = 1;
+		g_stall_count++;
+	} else if (age >= STALL2_MS && sup_snaps == 1u) {
+		sup_snapshot(1, now, age);
+		sup_snaps = 2;
+	} else if (age < STALL1_MS && sup_snaps != 0u) {
+		g_stall_resolved = sup_snaps;   /* near miss: main prints the lines, clears them */
+		sup_snaps = 0;
+	}
+}
+
 /* ------------------------------ power off -------------------------------- */
 static FUNC_NORETURN void power_off(void)
 {
+	g_sup_on = 0;               /* the FN-release wait below is not a stall */
+	crashdump_stall_clear();
+	stage(ST_POWEROFF);
 	controls_hw_leds_off();
 	/* save unsaved settings first (audio is going away, an erase is fine now) */
 	if (store_ok && (deb.dirty || ssched.pending)) {
@@ -1361,7 +1633,8 @@ static void log_diag(uint32_t now, bool detail)
 #endif
 	con_printf("  info fw=%s stk audio=%u/%u main=%u/%u sync=%u/%u apply_cyc_max=%u "
 		   "blk_cyc_max=%u starve=%u torn=%u lay_err=%u boots=%u rr=%x hw=%d adc=%d "
-		   "pwm_rel=0x%x cs42=%s tas=%s usb=%d trim=%d dB\r\n",
+		   "pwm_rel=0x%x cs42=%s tas=%s usb=%d trim=%d dB stalls=%u stall_max_ms=%u "
+		   "vbus=%d save_busy=%u cdc_tx=%u cdc_rx=%u txq_max=%u\r\n",
 		   FW_VERSION, a_used, a_sz, m_used, m_sz, s_used, s_sz,
 		   (unsigned int)g_apply_max, (unsigned int)g_blk_max_all, (unsigned int)g_starve,
 		   (unsigned int)eng.diag.torn_retries, (unsigned int)eng.diag.layout_errors,
@@ -1369,18 +1642,24 @@ static void log_diag(uint32_t now, bool detail)
 		   controls_hw_adc_status(), (unsigned int)controls_hw_released_pwms(),
 		   cs42_cfg_ok ? "ok" : (cs42_ok ? "cfg-fail" : "absent"),
 		   tas_cfg_ok ? "ok" : (tas_ok ? "cfg-fail" : "absent"), usb_rc,
-		   CONFIG_SP1FX_OUT_TRIM_DB);
+		   CONFIG_SP1FX_OUT_TRIM_DB, (unsigned int)g_stall_count,
+		   (unsigned int)g_stall_max_ms, usb_vbus() ? 1 : 0, (unsigned int)st_busy,
+		   (unsigned int)cdc_tx_bytes, (unsigned int)cdc_rx_bytes,
+		   (unsigned int)ctx.q.max_used);
 	con_printf("  store ok=%d load=%d seq=%u page=%d saves=%u erases=%u errors=%u "
-		   "write_ms_max=%u erase_ms_max=%u deferred=%u dirty=%d pending=%d | "
+		   "write_ms_max=%u erase_ms_max=%u deferred=%u dirty=%d pending=%d dedup=%u safe=%d "
+		   "adc_to=%u adc_max_ms=%u | "
 		   "sync on=%u hw=%u ticks=%u pulses=%u starts=%u | con drops=%u frames_drop=%u "
 		   "rx_drop=%u ev_drop=%u rx_frames=%u bad=%u\r\n",
 		   store_ok ? 1 : 0, st_load_rc, (unsigned int)store.seq, store.active_page,
 		   (unsigned int)st_saves, (unsigned int)st_erases, (unsigned int)st_errors,
 		   (unsigned int)st_write_ms_max, (unsigned int)st_erase_ms_max,
-		   (unsigned int)ssched.deferred, deb.dirty, ssched.pending, proto.sync_on,
+		   (unsigned int)ssched.deferred, deb.dirty, ssched.pending, (unsigned int)st_dedup,
+		   safe_boot ? 1 : 0, (unsigned int)controls_hw_adc_timeouts(),
+		   (unsigned int)controls_hw_adc_max_ms(), proto.sync_on,
 		   g_sync_hw_init, (unsigned int)g_sync_ticks, (unsigned int)g_sync_pulses,
-		   (unsigned int)g_sync_starts, (unsigned int)con_drops,
-		   (unsigned int)frame_drops, (unsigned int)rx_drops, (unsigned int)ev_rl.dropped,
+		   (unsigned int)g_sync_starts, (unsigned int)ctx.text_drops,
+		   (unsigned int)ctx.frame_drops, (unsigned int)rx_drops, (unsigned int)ev_rl.dropped,
 		   (unsigned int)proto.rx_frames, (unsigned int)proto.rx_dropped);
 }
 
@@ -1391,6 +1670,7 @@ int main(void)
 	NRF_POWER->RESETREAS = 0xFFFFFFFFu;
 	feed_wdt();
 	(void)crashdump_init();
+	crashdump_set_crumbs(g_crumbs);
 
 	if (device_is_ready(wdt)) {
 		struct wdt_timeout_cfg cfg = {
@@ -1432,12 +1712,16 @@ int main(void)
 	const flash_ops_t ops = { NULL, fl_read, fl_write, fl_erase };
 
 	store_ok = device_is_ready(flash_dev);
-	if (store_ok) {
+	safe_boot = crashdump_early_crashes() >= 2u;
+	if (store_ok && !safe_boot) {
 		(void)store_init(&store, ops);
 		st_load_rc = store_load(&store, &boot_d);
 	} else {
-		store_data_default(&boot_d);
+		store_data_default(&boot_d);   /* safe boot: factory defaults, journal untouched */
 	}
+	/* the loaded state counts as saved: no write at boot unless something really changes */
+	st_last_len = store_encode(&boot_d, st_last_rec, sizeof(st_last_rec));
+	st_last_save_ms = k_uptime_get_32();
 	feed_wdt();
 	const int boot_rejected = engine_apply_config(&eng, &boot_d.cfg);
 
@@ -1465,7 +1749,7 @@ int main(void)
 	};
 
 	proto_init(&proto, &pc);
-	conmode_init(&conm);
+	contx_init(&ctx, con_buf, sizeof(con_buf));
 	ratelimit_init(&ev_rl, 10, 20, k_uptime_get_32());
 	g_sync_bpm10 = (uint16_t)lrintf(proto.bpm * 10.0f);
 	g_sync_want = proto.sync_on;
@@ -1497,6 +1781,10 @@ int main(void)
 			K_NO_WAIT);
 	k_thread_name_set(&sync_tcb, "sync");
 #endif
+	g_main_tid = k_current_get();
+	g_loop_ms = k_uptime_get_32();
+	k_thread_foreach(sup_add_thread, NULL);
+	g_sup_on = 1;
 	wait_fed(5);
 
 	if (tas_ok) {
@@ -1542,6 +1830,8 @@ int main(void)
 	int hp_cand = -1, hp_cnt = 0;
 	controls_raw_t raw;
 	float fv[4] = { 0 };
+	uint16_t lad_mask = 0;
+	bool stable_marked = false;
 	struct shadow sh;
 
 	memset(&sh, 0, sizeof(sh));
@@ -1558,6 +1848,22 @@ int main(void)
 	for (;;) {
 		feed_wdt();
 		now = k_uptime_get_32();
+		g_loop_ms = now;
+		g_crumbs[1] = now;
+		if (!stable_marked && now >= CRASHDUMP_EARLY_MS) {
+			crashdump_mark_stable();   /* this run did not crash early */
+			stable_marked = true;
+		}
+		stage(ST_CONSOLE);
+		if (g_stall_resolved) {
+			EV_PRINTF("STALL near miss: control loop stopped for %u ms (watchdog at ~4000)\r\n",
+				  (unsigned int)g_stall_max_ms);
+			for (int i = 0; i < (int)g_stall_resolved && i < CRASHDUMP_STALL_SLOTS; i++) {
+				EV_PRINTF("STALL[%d]: %s\r\n", i, sup_line[i]);
+			}
+			g_stall_resolved = 0;
+			crashdump_stall_clear();
+		}
 
 		/* ---- port mode, banner when a terminal opens the port ---- */
 		conm_poll();
@@ -1565,17 +1871,29 @@ int main(void)
 			con_printf("I SP-1 FX %s: USB audio + effects + controls + companion protocol. "
 				   "Text until the companion sends its first frame. resetreas=0x%x "
 				   "boot_rejected=%d store_load=%d (0 = saved settings) sync=%s bpm=%u "
-				   "trim=%d dB\r\n", FW_VERSION, (unsigned int)sp1fx_boot_resetreas,
+				   "trim=%d dB%s\r\n", FW_VERSION, (unsigned int)sp1fx_boot_resetreas,
 				   boot_rejected, st_load_rc, proto.sync_on ? "ON" : "off",
-				   (unsigned int)lrintf(proto.bpm), CONFIG_SP1FX_OUT_TRIM_DB);
+				   (unsigned int)lrintf(proto.bpm), CONFIG_SP1FX_OUT_TRIM_DB,
+				   safe_boot ? " SAFE BOOT: 2+ early crashes in a row -> factory defaults, "
+					       "saved settings not loaded and not written this run" : "");
 		}
 		was_text = conmode_text_ok(&conm);
 		crashdump_poll(now, conmode_text_ok(&conm), con_write);
 
 		/* ---- controls ---- */
-		(void)controls_hw_read(&raw);
-		uint16_t buttons = (uint16_t)(ladder_update(&lad1, raw.ladder1) |
+		stage(ST_ADC);
+		/* never waits for the SAADC (rc1 used the blocking adc_read: K_FOREVER) */
+		if (controls_hw_read_nb(&raw, now, ADC_TIMEOUT_MS) == 0) {
+			lad_mask = (uint16_t)(ladder_update(&lad1, raw.ladder1) |
 					      ladder_update(&lad2, raw.ladder2));
+			for (int i = 0; i < 4; i++) {
+				fv[i] = fader_update(&fad[i], raw.fader[i]);
+			}
+		}
+		g_crumbs[3] = (controls_hw_adc_stuck() ? 2u : 0u) |
+			      (controls_hw_adc_timeouts() << 8);
+		stage(ST_CONTROLLER);
+		uint16_t buttons = lad_mask;
 		const bool fnp = controls_hw_fn_pressed();
 
 		if (!fnp) {
@@ -1583,9 +1901,6 @@ int main(void)
 		}
 		if (fnp && fn_armed) {
 			buttons |= BTN_BIT(BTN_FN);
-		}
-		for (int i = 0; i < 4; i++) {
-			fv[i] = fader_update(&fad[i], raw.fader[i]);
 		}
 		controller_tick(&ui, now, buttons, fv);
 		if (ui.power_off_request) {
@@ -1598,8 +1913,10 @@ int main(void)
 		}
 
 		/* ---- companion protocol (also drains the controller's events) ---- */
+		stage(ST_PROTO_RX);
 		rx_drain();
 		conm_poll();
+		stage(ST_PROTO_TICK);
 		proto_tick(&proto, now);
 		g_sync_bpm10 = (uint16_t)lrintf(proto.bpm * 10.0f);
 		g_sync_want = proto.sync_on;
@@ -1609,7 +1926,9 @@ int main(void)
 			seen_change = ui.change_seq;
 			store_debounce_mark(&deb, now);
 		}
+		stage(ST_STORE);
 		storage_tick(now);
+		stage(ST_LEDS);
 
 		/* ---- LEDs ---- */
 		led_frame_t f;
@@ -1623,6 +1942,7 @@ int main(void)
 		/* ---- headphone detect / output switch ---- */
 		if ((int32_t)(now - next_hp) >= 0) {
 			next_hp = now + HP_POLL_MS;
+			stage(ST_HP_I2C);
 			if (cs42_cfg_ok) {
 				int c = cs42_hp_present();
 
@@ -1650,6 +1970,7 @@ int main(void)
 		}
 
 		/* ---- text diagnostics ---- */
+		stage(ST_DIAG);
 		log_changes(&sh, now);
 		if ((int32_t)(now - next_diag) >= 0) {
 			next_diag = now + CONFIG_SP1FX_DIAG_PERIOD_MS;
@@ -1659,6 +1980,7 @@ int main(void)
 			diag_n++;
 		}
 
+		stage(ST_SLEEP);
 		next += TICK_MS;
 		const int64_t t = k_uptime_get();
 
