@@ -105,7 +105,7 @@ All entries are EXPECTED results. Write P or F, and note what you actually saw.
 **Boot**
 
 - [ ] After flashing, the console shows `I SP-1 FX controls bring-up ... adc=0 ... rejected=0` and slots Filter/Chorus/Delay/Reverb.
-- [ ] All 8 LEDs are dark: every slot is bypassed and there is no audio.
+- [ ] (Observed on hardware: the slots boot ENABLED with wet 0% (`byp=0000`), so the track LEDs are dim, not dark. This item was wrong.) There is no audio, so the play-side LEDs are dark.
 - [ ] `lt=` stays well below 8000 µs. Expect roughly 1000 µs or less.
 - [ ] The device keeps running for more than 1 minute without a reset. A watchdog reset would show as a new `I` line with a fresh low timestamp.
 
