@@ -290,6 +290,11 @@ static void leds_base(const controller_t *c, uint32_t now, led_frame_t *o)
 			continue;
 		}
 		o->track[i] = level_led(cfg->wet[i], c->to[i].picked ? 0 : c->to[i].need, now);
+		/* switched off by the overload guard (or all, when it forced bypass): slow 1 Hz
+		 * blink, distinct from the 0.5 s takeover cues; it clears when the guard
+		 * recovers the slot or the slot gets a new effect */
+		if (((c->eng->diag.shed_mask >> i) & 1u) || c->eng->diag.forced_bypass)
+			if ((now / 500u) & 1u) o->track[i] = 0;
 	}
 	/* just-loaded preset: confirm flash on the four PLAY-side LEDs, then a bar showing the place in
 	 * the list (1..4 LEDs; a position cue, not a number). Takes priority over the level meter. */
@@ -332,20 +337,25 @@ int controller_poweroff_countdown(const controller_t *c, uint32_t now)
 {
 	const gesture_t *g = &c->gest;
 	if (!g->fn_down || g->fn_consumed || g->fn_long_sent) return 0;
-	uint32_t held = now - g->fn_t;
-	if (held + GESTURE_FN_WARN_MS < GESTURE_FN_LONG_MS) return 0;
-	uint32_t into = held - (GESTURE_FN_LONG_MS - GESTURE_FN_WARN_MS);
-	int lit = 1 + (int)(into * 4u / GESTURE_FN_WARN_MS);
-	return lit > 4 ? 4 : lit;
+	uint32_t n = (now - g->fn_t) / GESTURE_FN_STEP_MS;
+	return n > 8u ? 8 : (int)n;
+}
+
+void controller_fill_leds(int n, led_frame_t *o)
+{
+	memset(o, 0, sizeof *o);
+	for (int i = 0; i < 4; i++) o->play[i] = i < n ? 255 : 0;
+	for (int i = 0; i < 4; i++) o->track[i] = i + 4 < n ? 255 : 0;
 }
 
 void controller_leds(const controller_t *c, uint32_t now, led_frame_t *o)
 {
 	leds_base(c, now, o);
-	/* power-off countdown has priority: the PLAY-side LEDs fill up during the last second */
+	/* power-off fill has priority over everything (from 0.5 s of FN held alone); releasing
+	 * FN or using any other button ends it and the normal display returns */
 	int cd = controller_poweroff_countdown(c, now);
 	if (cd > 0) {
-		for (int i = 0; i < 4; i++) o->play[i] = i < cd ? 255 : 0;
+		controller_fill_leds(cd, o);
 		return;
 	}
 	int showing_select = c->held_slot >= 0 && (c->selecting || now - c->held_since > 250u) && c->mode == UI_PERFORM;

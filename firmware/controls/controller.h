@@ -87,8 +87,11 @@ void controller_set_presets(controller_t *c, int count, int (*fill)(void *ctx, i
 /* Pop the oldest device-originated event; returns 0 if none. */
 int controller_pop_event(controller_t *c, ctl_event_t *out);
 void controller_leds(const controller_t *c, uint32_t now_ms, led_frame_t *out);
-/* 0..4: PLAY-side LEDs lit by the power-off countdown (FN held alone in its last second). */
+/* 0..8: LEDs lit by the power-off fill while FN is held alone: one more every 0.5 s, the four
+ * PLAY-side LEDs first, then T1..T4 (the 8th at 4.0 s = power off). 0 = not counting. */
 int controller_poweroff_countdown(const controller_t *c, uint32_t now_ms);
+/* Draw a fill of n (0..8) LEDs into a frame (used for power off and power on). */
+void controller_fill_leds(int n, led_frame_t *out);
 
 /* VOL+/VOL-: 2 dB per press on the engine's -60..0 dB master taper (controls/volume.h). */
 #define MASTER_STEPS VOL_STEPS

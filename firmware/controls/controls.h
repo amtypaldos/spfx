@@ -44,11 +44,11 @@ typedef struct {
 } gesture_event_t;
 
 #define GESTURE_TAP_MAX_MS 600u
-/* FN held alone this long = power off (rc3: 3 s, was 1.5 s, which was hit by accident while
- * cycling presets with FN + rocker). Any other button pressed during the same FN press
- * cancels it for that press. */
-#define GESTURE_FN_LONG_MS 3000u
-#define GESTURE_FN_WARN_MS 1000u /* LED countdown during the last second (controller) */
+/* FN held alone this long = power off (owner decision for rc3: 4 s; 1.5 s was hit by accident
+ * while cycling presets with FN + rocker). Any other button pressed during the same FN press
+ * cancels it for that press. The controller shows an 8-LED fill, one LED per 0.5 s. */
+#define GESTURE_FN_LONG_MS 4000u
+#define GESTURE_FN_STEP_MS 500u
 #define GESTURE_ROCKER_DELAY_MS 450u
 #define GESTURE_ROCKER_REPEAT_MS 200u
 #define GESTURE_VOL_DELAY_MS 400u
