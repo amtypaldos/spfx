@@ -66,7 +66,7 @@ int proto_parse_frame(const uint8_t *enc, size_t n, uint8_t *body, proto_frame_t
 
 /* ---- device instance ---- */
 typedef void (*proto_tx_fn)(void *ctx, const uint8_t *bytes, size_t n);
-typedef int (*proto_save_fn)(void *ctx); /* SAVE_NOW: 0 ok, nonzero = storage error */
+typedef int (*proto_save_fn)(void *ctx); /* SAVE_NOW: 0 ok, PR_BUSY = not now (kept pending), other = storage error */
 
 typedef struct {
 	engine_t *eng;           /* required */
@@ -101,6 +101,7 @@ typedef struct {
 	uint16_t rx_len;
 	uint8_t rx_overflow;
 	uint32_t rx_frames, rx_dropped;
+	uint8_t last_type;  /* type of the last valid frame received (diagnostics) */
 
 	/* meters */
 	uint8_t sub_hz;

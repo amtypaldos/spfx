@@ -377,6 +377,9 @@ static void test_golden_requests(void)
 	save_result = -1;
 	feed(g_req_save_now, sizeof g_req_save_now);
 	CHECK(result_code(PT_SAVE_NOW, 14) == PR_STORAGE);
+	save_result = PR_BUSY; /* firmware: the save would need a flash erase while USB is connected */
+	feed(g_req_save_now, sizeof g_req_save_now);
+	CHECK(result_code(PT_SAVE_NOW, 14) == PR_BUSY);
 	pr.c.save = NULL;
 	feed(g_req_save_now, sizeof g_req_save_now);
 	CHECK(result_code(PT_SAVE_NOW, 14) == PR_STORAGE);

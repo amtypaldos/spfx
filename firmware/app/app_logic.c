@@ -85,6 +85,99 @@ int conmode_binary_ok(const con_mode_t *m)
 	return m->binary;
 }
 
+/* ---- TX queue ---- */
+
+void txq_init(txq_t *q, uint8_t *buf, uint32_t cap)
+{
+	q->buf = buf;
+	q->cap = cap;
+	q->head = q->tail = 0;
+	q->max_used = 0;
+}
+
+uint32_t txq_used(const txq_t *q)
+{
+	return q->head - q->tail;
+}
+
+uint32_t txq_space(const txq_t *q)
+{
+	return q->cap - txq_used(q);
+}
+
+int txq_put(txq_t *q, const uint8_t *p, uint32_t n)
+{
+	if (n == 0u || n > txq_space(q)) return 0;
+	uint32_t h = q->head;
+	for (uint32_t i = 0; i < n; i++) q->buf[(h + i) % q->cap] = p[i];
+	q->head = h + n; /* publish after the data (single core; volatile orders the store) */
+	uint32_t u = txq_used(q);
+	if (u > q->max_used) q->max_used = u;
+	return 1;
+}
+
+uint32_t txq_peek(const txq_t *q, const uint8_t **p, uint32_t max)
+{
+	uint32_t used = txq_used(q);
+	uint32_t off = q->tail % q->cap;
+	uint32_t n = q->cap - off; /* contiguous up to the end of the buffer */
+	if (n > used) n = used;
+	if (n > max) n = max;
+	*p = q->buf + off;
+	return n;
+}
+
+void txq_consume(txq_t *q, uint32_t n)
+{
+	uint32_t used = txq_used(q);
+	q->tail += n > used ? used : n;
+}
+
+/* ---- console TX: mode + queue ---- */
+
+void contx_init(contx_t *c, uint8_t *buf, uint32_t cap)
+{
+	memset(c, 0, sizeof *c);
+	conmode_init(&c->m);
+	txq_init(&c->q, buf, cap);
+}
+
+static void try_sep(contx_t *c)
+{
+	static const uint8_t z = 0;
+	if (c->sep_pending && txq_put(&c->q, &z, 1)) {
+		c->sep_pending = 0;
+		c->sep_sent++;
+	}
+}
+
+void contx_poll(contx_t *c, int dtr, uint32_t rx_frames)
+{
+	if (conmode_update(&c->m, dtr, rx_frames)) c->sep_pending = 1;
+	if (!conmode_binary_ok(&c->m)) c->sep_pending = 0;
+	try_sep(c);
+}
+
+int contx_text(contx_t *c, const uint8_t *s, uint32_t n)
+{
+	if (!conmode_text_ok(&c->m)) return 0;
+	if (txq_put(&c->q, s, n)) return 1;
+	c->text_drops++;
+	return 0;
+}
+
+int contx_frame(contx_t *c, const uint8_t *f, uint32_t n)
+{
+	if (!conmode_binary_ok(&c->m)) return 0;
+	try_sep(c);
+	if (c->sep_pending || !txq_put(&c->q, f, n)) {
+		c->frame_drops++;
+		return 0;
+	}
+	c->frames_sent++;
+	return 1;
+}
+
 /* ---- quiet detector ---- */
 
 void quiet_feed(quiet_t *q, float in_peak, float out_peak)

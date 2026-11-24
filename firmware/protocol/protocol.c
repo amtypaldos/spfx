@@ -331,7 +331,12 @@ static void handle(proto_t *p, const proto_frame_t *f)
 		break;
 	case PT_SAVE_NOW:
 		NEED(0);
-		code = (p->c.save && p->c.save(p->c.ctx) == 0) ? PR_OK : PR_STORAGE;
+		if (!p->c.save) {
+			code = PR_STORAGE;
+		} else {
+			int rc = p->c.save(p->c.ctx);
+			code = rc == 0 ? PR_OK : (rc == PR_BUSY ? PR_BUSY : PR_STORAGE);
+		}
 		send_result(p, f->seq, f->type, code);
 		return; /* saving is not a state change */
 	case PT_FACTORY_RESET: {
@@ -379,6 +384,7 @@ void proto_rx_byte(proto_t *p, uint8_t b)
 			proto_frame_t f;
 			if (proto_parse_frame(p->rx, p->rx_len, p->body, &f) == 0) {
 				p->rx_frames++;
+				p->last_type = f.type;
 				handle(p, &f);
 			} else {
 				p->rx_dropped++;

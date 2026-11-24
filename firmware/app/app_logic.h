@@ -60,6 +60,41 @@ int conmode_update(con_mode_t *m, int dtr, uint32_t rx_frames);
 int conmode_text_ok(const con_mode_t *m);    /* diagnostic text may be sent */
 int conmode_binary_ok(const con_mode_t *m);  /* protocol frames may be sent */
 
+/* ---- 2b. console TX queue + mode, as one unit (what main.c uses) -----------------------
+ * Byte ring with whole-message semantics: a text line or protocol frame is queued
+ * completely or not at all (never half a frame), and the producer NEVER waits: when the
+ * host does not read (port open but stalled, or no reader at all), messages are dropped and
+ * counted. Single producer (control thread) / single consumer (CDC callback). The 0x00 mode
+ * separator is guaranteed to precede the first binary frame: while it cannot be queued,
+ * frames are dropped (and the separator retried) rather than sent without it. */
+typedef struct {
+	uint8_t *buf;
+	uint32_t cap;
+	volatile uint32_t head, tail;   /* free-running; head: producer, tail: consumer */
+	uint32_t max_used;
+} txq_t;
+
+void txq_init(txq_t *q, uint8_t *buf, uint32_t cap);
+uint32_t txq_used(const txq_t *q);
+uint32_t txq_space(const txq_t *q);
+int txq_put(txq_t *q, const uint8_t *p, uint32_t n);        /* 1 queued whole, 0 dropped */
+uint32_t txq_peek(const txq_t *q, const uint8_t **p, uint32_t max); /* contiguous bytes */
+void txq_consume(txq_t *q, uint32_t n);
+
+typedef struct {
+	con_mode_t m;
+	txq_t q;
+	uint8_t sep_pending;
+	uint32_t text_drops, frame_drops, frames_sent, sep_sent;
+} contx_t;
+
+void contx_init(contx_t *c, uint8_t *buf, uint32_t cap);
+/* Mode update from DTR and the protocol's valid-frame counter (see conmode_update). */
+void contx_poll(contx_t *c, int dtr, uint32_t rx_frames);
+/* 1 queued; 0 not allowed in this mode or dropped. Never blocks. */
+int contx_text(contx_t *c, const uint8_t *s, uint32_t n);
+int contx_frame(contx_t *c, const uint8_t *f, uint32_t n);
+
 /* ---- 3. audio quiet detector -------------------------------------------------------- */
 #define QUIET_PEAK 0.0005f         /* -66 dBFS: below this a block counts as silent */
 typedef struct {
