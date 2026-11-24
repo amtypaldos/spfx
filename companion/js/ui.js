@@ -228,10 +228,13 @@ export function mountUI({ store, ctl, library, env }) {
     const live = m.synced;
     const dash = '—';
     $('tFw').textContent = live ? (m.fw || dash) : dash;
-    $('tFwSub').textContent = live ? `protocol v${m.proto}${m.mode === 'demo' ? ' · simulated' : ''}` : 'protocol —';
+    const pwr = m.meters.charging ? ' · charging' : m.meters.usbPower ? ' · USB power' : '';
+    $('tFwSub').textContent = live ? `protocol v${m.proto}${m.mode === 'demo' ? ' · simulated' : ''}${pwr}` : 'protocol —';
     const q = m.meters;
     $('tCpu').textContent = live ? `${q.cpuPct} %` : dash;
-    $('tCpuSub').textContent = live ? `peak ${q.cpuPeakPct} % · budget ${m.cpuBudget} cycles/frame` : 'peak —';
+    const shed = [0, 1, 2, 3].filter((i) => (q.guardShed >> i) & 1).map((i) => i + 1);
+    const guard = q.guardForced ? ' · overload guard: ALL effects off' : shed.length ? ` · overload guard: slot ${shed.join(', ')} off` : '';
+    $('tCpuSub').textContent = live ? `peak ${q.cpuPeakPct} % · budget ${m.cpuBudget} cycles/frame${guard}` : 'peak —';
     setBar($('cpuBar'), q.cpuPct / 100, q.cpuPct > 90 ? 'clip' : q.cpuPct > 75 ? 'hot' : '');
     const pool = m.poolBytes || POOL_BYTES;
     $('tMem').textContent = live ? fmtBytes(q.memUsed) : dash;

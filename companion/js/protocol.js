@@ -211,7 +211,8 @@ export function encodePayload(msg) {
     case T.METERS:
       w.u16(msg.inPeak).u16(msg.outPeak).u8(msg.cpuPct).u8(msg.cpuPeakPct).u32(msg.memUsed)
         .u32(msg.inClips).u32(msg.outClips).u32(msg.underruns).u32(msg.overruns).u32(msg.nanEvents)
-        .u8(msg.uiMode).u8(msg.editSlot).u8(msg.globalBypass ? 1 : 0);
+        .u8(msg.uiMode).u8(msg.editSlot)
+        .u8((msg.globalBypass ? 1 : 0) | (msg.usbPower ? 2 : 0) | (msg.charging ? 4 : 0) | (msg.guardForced ? 8 : 0) | (((msg.guardShed ?? 0) & 15) << 4));
       break;
     default: throw new ProtocolError(`cannot encode type 0x${(msg.type >>> 0).toString(16)}`);
   }
@@ -271,7 +272,12 @@ export function decodePayload(type, payload) {
     case T.METERS:
       m = { type, inPeak: r.u16(), outPeak: r.u16(), cpuPct: r.u8(), cpuPeakPct: r.u8(), memUsed: r.u32(),
         inClips: r.u32(), outClips: r.u32(), underruns: r.u32(), overruns: r.u32(), nanEvents: r.u32(),
-        uiMode: r.u8(), editSlot: r.u8(), globalBypass: (r.u8() & 1) === 1 };
+        uiMode: r.u8(), editSlot: r.u8() };
+      { // flags: bit0 global bypass, bit1 USB power, bit2 charging, bit3 guard forced bypass, bits4-7 guard shed slots
+        const fl = r.u8();
+        Object.assign(m, { globalBypass: (fl & 1) === 1, usbPower: (fl & 2) !== 0, charging: (fl & 4) !== 0,
+          guardForced: (fl & 8) !== 0, guardShed: fl >> 4 });
+      }
       break;
     default: throw new ProtocolError(`unknown message type 0x${type.toString(16)}`);
   }

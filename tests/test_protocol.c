@@ -794,6 +794,8 @@ static void test_subscribe_timing(void)
 	CHECK(nfr == 0);
 }
 
+static uint8_t test_power_flags(void *ctx) { (void)ctx; return 0xFF; } /* only bits 1-2 may pass */
+
 static void test_meters_content(void)
 {
 	setup();
@@ -836,6 +838,17 @@ static void test_meters_content(void)
 	uint32_t mem;
 	engine_resources(&eng, &mem, NULL);
 	CHECK(m && g32(m->pay + 6) == mem);
+	/* rc3 flags: guard shed slots in bits 4-7, forced bypass bit3, power bits from the app */
+	eng.diag.shed_mask = 0x0B;
+	eng.diag.forced_bypass = 1;
+	pr.c.power_flags = test_power_flags;
+	clear_tx();
+	proto_tick(&pr, T + 180);
+	m = last_of(PT_METERS);
+	CHECK(m && m->pay[32] == (1u | 2u | 4u | 8u | 0xB0u));
+	eng.diag.shed_mask = 0;
+	eng.diag.forced_bypass = 0;
+	pr.c.power_flags = NULL;
 }
 
 /* ------------------------------------------------------------------ factory reset */

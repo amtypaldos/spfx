@@ -547,7 +547,13 @@ static void send_meters(proto_t *p)
 	w32(&w, e->diag.nan_events);
 	w8(&w, p->c.ctl ? (uint32_t)p->c.ctl->mode : 0u);
 	w8(&w, p->c.ctl ? (uint32_t)p->c.ctl->edit_slot : 0u);
-	w8(&w, e->cfg.global_bypass ? 1u : 0u);
+	/* flags: bit0 global bypass, bit1 USB power, bit2 charging, bit3 overload guard forced
+	 * bypass, bits 4-7 slots switched off by the overload guard */
+	uint32_t fl = e->cfg.global_bypass ? 1u : 0u;
+	if (p->c.power_flags) fl |= p->c.power_flags(p->c.ctx) & 6u;
+	if (e->diag.forced_bypass) fl |= 8u;
+	fl |= (uint32_t)(e->diag.shed_mask & 15u) << 4;
+	w8(&w, fl);
 	send(p, PT_METERS, 0, w.p, w.n);
 }
 

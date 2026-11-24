@@ -62,6 +62,7 @@ export function applyMeters(m, x) {
   Object.assign(m.meters, {
     inPeak: x.inPeak, outPeak: x.outPeak, cpuPct: x.cpuPct, cpuPeakPct: x.cpuPeakPct, memUsed: x.memUsed,
     inClips: x.inClips, outClips: x.outClips, underruns: x.underruns, overruns: x.overruns, nanEvents: x.nanEvents,
+    usbPower: !!x.usbPower, charging: !!x.charging, guardForced: !!x.guardForced, guardShed: x.guardShed ?? 0,
   });
   m.globalBypass = x.globalBypass;
   m.uiMode = x.uiMode; m.editSlot = x.editSlot;

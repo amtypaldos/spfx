@@ -80,6 +80,8 @@ typedef struct {
 	uint16_t block;          /* audio block size reported in HELLO_RSP */
 	float bpm;               /* initial tempo (30..300) */
 	uint8_t sync_on;         /* initial sync-clock state (restored from the saved config) */
+	/* optional: METERS flags bit1 USB power present, bit2 charging (return those bits) */
+	uint8_t (*power_flags)(void *ctx);
 } proto_config_t;
 
 typedef struct {
