@@ -29,7 +29,7 @@ export class Client {
       const r = parseFrame(f);
       if (!r.ok) { this.dropped++; continue; }   // corrupt frames are dropped silently; request timers retry
       const { seq, msg } = r;
-      if (msg.type === T.EVENT || msg.type === T.ADMISSION_ERROR || msg.type === T.METERS) { this.onEvent?.(msg); continue; }
+      if (msg.type === T.EVENT || msg.type === T.ADMISSION_ERROR || msg.type === T.METERS || msg.type === T.PRESET_LOADED) { this.onEvent?.(msg); continue; }
       const p = this.pending.get(seq);
       if (!p) continue;
       const want = RESPONSE_TYPE[p.msg.type] ?? T.RESULT;

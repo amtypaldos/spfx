@@ -120,6 +120,11 @@ export class MockDevice {
     if (setter.type === T.SET_SLOT_FX) this._emit({ type: T.ADMISSION_ERROR, slot: setter.slot, fx: setter.fx, code });
     return false;
   }
+  /** Device loaded one of its own presets (FN + rocker): mutate the whole state, then announce it with 0xA3. */
+  simulatePresetLoad(idx, mutate) {
+    mutate(this.s);
+    this._emit({ type: T.PRESET_LOADED, idx, bpm10: this.s.bpm10 });
+  }
   simulateFader(slot, idx, v) { return this.deviceChange({ type: T.SET_PARAM, slot, idx, v }); }
   /** Physical effect-cycle on a slot: next effect, wrapping through None. */
   simulateCycleFx(slot) {

@@ -223,3 +223,14 @@ test('controller: slot-order-dependent presets succeed by freeing memory first',
   assert.deepEqual(dev.s.fxId, [ID.chorus, ID.delay, ID.reverb, ID.tremolo]);
   await ctl.disconnect();
 });
+
+test('device-loaded preset (0xA3): companion re-reads the whole state', async () => {
+  const { dev, tr, store, ctl, notices } = rig();
+  await ctl.connect(tr, 'demo');
+  dev.simulatePresetLoad(3, (st) => { st.fxId[0] = ID.reverb; st.master = 0.5; st.bpm10 = 987; st.bypass[1] = false; });
+  await settle(30); await new Promise((r) => setTimeout(r, 30));
+  assert.equal(store.model.slots[0].fx, ID.reverb);
+  assert.ok(Math.abs(store.model.master - 0.5) < 1e-3);
+  assert.equal(Math.round(store.model.bpm * 10), 987);
+  assert.ok(notices.some((n) => /preset 4/i.test(n.text)));
+});

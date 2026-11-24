@@ -51,6 +51,8 @@ Max body 512 bytes (payload 500 + 5 bytes of overhead + COBS expansion is handle
 
 **0xA1 ADMISSION_ERROR** (unsolicited): `slot u8, fx u8, code u8`. Sent when a physical effect-cycle was rejected, so the companion can show why.
 
+**0xA3 PRESET_LOADED** (unsolicited, seq 0): `idx u8, bpm10 u16`. The device loaded one of its own presets (FN + rocker), so many values changed at once. The host must re-read GET_STATE. Individual 0xA0 events for the same change are not sent; pending fader events from before the load are discarded.
+
 **0xA2 METERS** (only while subscribed): `in_peak u16, out_peak u16` (linear, 32768 = full scale, peak since the last report), `cpu_pct u8, cpu_peak_pct u8, mem_used u32, in_clips u32, out_clips u32, underruns u32, overruns u32, nan_events u32, ui_mode u8, edit_slot u8, flags u8` (bit0 = global bypass).
 
 ## Definitions (v1)

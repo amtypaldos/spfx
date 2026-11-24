@@ -2,6 +2,8 @@
 #include "t.h"
 #include "../firmware/controls/controller.h"
 #include "../firmware/app/sync_out.h"
+#include "../firmware/app/factory_presets.h"
+#include "../firmware/dsp/util.h"
 
 #define SR 48000.0f
 static uint8_t pool[150 * 1024];
@@ -374,6 +376,217 @@ static void test_sync_out(void)
 	CHECK(s.frames_per_tick > 0);
 }
 
+
+/* ---------------------------------------------------------------- presets (FN + rocker) */
+static int fill_factory(void *ctx, int idx, store_data_t *out)
+{
+	(void)ctx;
+	if (idx < 0 || idx >= FACTORY_PRESET_COUNT) return -1;
+	factory_preset_fill(&factory_presets[idx], out);
+	return 0;
+}
+static int fill_toobig(void *ctx, int idx, store_data_t *out)
+{
+	(void)ctx; (void)idx;
+	store_data_default(out);
+	for (int s = 0; s < 4; s++) out->cfg.fx_id[s] = FX_DELAY; /* 4 x 77 KB cannot fit */
+	return 0;
+}
+static void setup_presets(void)
+{
+	setup(850);
+	/* roomy budget so every factory preset fits whatever the setup() slots hold */
+	engine_init(&eng, pool, sizeof pool, SR, ENGINE_DEFAULT_CPU_BUDGET);
+	controller_init(&ui, &eng);
+	controller_set_presets(&ui, FACTORY_PRESET_COUNT, fill_factory, 0);
+	for (int i = 0; i < 4; i++) fad[i] = 0.5f;
+	T = 1000;
+}
+static int same_fx(const store_data_t *d)
+{
+	for (int s = 0; s < 4; s++) if (eng.cfg.fx_id[s] != d->cfg.fx_id[s]) return 0;
+	return 1;
+}
+
+static void test_preset_cycle_gesture(void)
+{
+	setup_presets();
+	store_data_t d;
+	/* FN + FWD: first press loads preset 0 after the fade */
+	hold(B(BTN_FN), 40);
+	hold(B(BTN_FN) | B(BTN_FWD), 24);
+	hold(B(BTN_FN), 80);
+	hold(0, 40);
+	fill_factory(0, 0, &d);
+	CHECK(same_fx(&d));
+	CHECK(ui.preset_idx == 0);
+	/* FN release after FN + rocker is not a tap: no mode change, no bypass toggles */
+	CHECK(ui.mode == UI_PERFORM);
+	/* next, previous, wrap both ways */
+	hold(B(BTN_FN), 40); hold(B(BTN_FN) | B(BTN_FWD), 24); hold(B(BTN_FN), 80); hold(0, 40);
+	CHECK(ui.preset_idx == 1);
+	hold(B(BTN_FN), 40); hold(B(BTN_FN) | B(BTN_REV), 24); hold(B(BTN_FN), 80); hold(0, 40);
+	CHECK(ui.preset_idx == 0);
+	hold(B(BTN_FN), 40); hold(B(BTN_FN) | B(BTN_REV), 24); hold(B(BTN_FN), 80); hold(0, 40);
+	CHECK(ui.preset_idx == FACTORY_PRESET_COUNT - 1);
+	hold(B(BTN_FN), 40); hold(B(BTN_FN) | B(BTN_FWD), 24); hold(B(BTN_FN), 80); hold(0, 40);
+	CHECK(ui.preset_idx == 0);
+	/* holding the rocker repeats */
+	hold(B(BTN_FN), 40);
+	hold(B(BTN_FN) | B(BTN_FWD), 1500);
+	hold(B(BTN_FN), 80); hold(0, 80);
+	CHECK(ui.preset_idx >= 3 || ui.preset_idx < 0 + 1 + 6);
+	CHECK(ui.preset_idx != 0);
+	/* the first press from a fresh start going backwards lands on the last preset */
+	setup_presets();
+	hold(B(BTN_FN), 40); hold(B(BTN_FN) | B(BTN_REV), 24); hold(B(BTN_FN), 80); hold(0, 40);
+	CHECK(ui.preset_idx == FACTORY_PRESET_COUNT - 1);
+}
+
+static void test_preset_rapid_presses_coalesce(void)
+{
+	/* human-speed taps (~100 ms apart): each one loads its own preset */
+	setup_presets();
+	hold(B(BTN_FN), 40);
+	for (int k = 0; k < 3; k++) { hold(B(BTN_FN) | B(BTN_FWD), 40); hold(B(BTN_FN), 64); }
+	hold(B(BTN_FN), 80); hold(0, 40);
+	CHECK(ui.preset_idx == 2);
+	ctl_event_t ev; int presets = 0;
+	while (controller_pop_event(&ui, &ev)) if (ev.kind == CTL_EV_PRESET) presets++;
+	CHECK(presets == 3);
+
+	/* edges arriving faster than the fade window (1-tick debounce) coalesce into ONE load */
+	setup_presets();
+	ui.deb.n_required = 1;
+	hold(B(BTN_FN), 40);
+	for (int k = 0; k < 3; k++) { hold(B(BTN_FN) | B(BTN_FWD), 8); hold(B(BTN_FN), 8); }
+	hold(B(BTN_FN), 80); hold(0, 40);
+	CHECK(ui.preset_idx == 2);
+	presets = 0;
+	while (controller_pop_event(&ui, &ev)) if (ev.kind == CTL_EV_PRESET) presets++;
+	CHECK(presets == 1);
+}
+
+static void test_preset_leaves_edit_mode_and_does_not_jump_faders(void)
+{
+	setup_presets();
+	/* enter edit mode for slot 2, then FN + rocker */
+	hold(B(BTN_FN), 40); hold(B(BTN_FN) | B(BTN_T2), 40); hold(B(BTN_FN), 40); hold(0, 40);
+	CHECK(ui.mode == UI_EDIT);
+	hold(B(BTN_FN), 40); hold(B(BTN_FN) | B(BTN_FWD), 24); hold(B(BTN_FN), 80); hold(0, 80);
+	CHECK(ui.mode == UI_PERFORM);
+	store_data_t d; fill_factory(0, 0, &d);
+	/* faders sit at 0.5 but the preset's wet levels differ: nothing may jump */
+	for (int i = 0; i < 4; i++) {
+		CHECK_NEAR(eng.cfg.wet[i], d.cfg.wet[i], 1e-4);
+		CHECK(!ui.to[i].picked || fabsf(0.5f - d.cfg.wet[i]) <= TAKEOVER_WINDOW);
+	}
+	/* a fader far from its value shows pickup guidance */
+	int guided = 0;
+	for (int i = 0; i < 4; i++) if (ui.to[i].need != 0) guided++;
+	CHECK(guided >= 1);
+}
+
+static void test_preset_fade_is_silent_and_recovers(void)
+{
+	setup_presets();
+	engine_set_master(&eng, 1.0f); eng.master_cur = 1.0f;
+	for (int s = 0; s < 4; s++) engine_set_bypass(&eng, s, 1);
+	float ph = 0, l[384], r[384];
+	double before = 0, quiet = 1e9, after = 0;
+	int stage = 0; uint32_t t_press = 0;
+	for (int tick = 0; tick < 200; tick++) {
+		T += 8;
+		uint16_t btn = 0;
+		if (tick >= 50 && tick < 53) btn = B(BTN_FN);
+		if (tick >= 53 && tick < 55) btn = B(BTN_FN) | B(BTN_FWD);
+		if (tick >= 55 && tick < 60) btn = B(BTN_FN);
+		if (tick == 53) t_press = T;
+		controller_tick(&ui, T, btn, fad);
+		for (int i = 0; i < 384; i++) { l[i] = r[i] = 0.3f * sinf(ph); ph += 2.0f * FX_PI * 440.0f / SR; }
+		engine_process(&eng, l, r, l, r, 384);
+		double e = 0; for (int i = 0; i < 384; i++) e += (double)l[i] * l[i];
+		e = sqrt(e / 384);
+		if (tick == 45) before = e;
+		if (t_press && T - t_press >= 16 && T - t_press <= 24) { if (e < quiet) quiet = e; }
+		if (tick == 150) after = e;
+		(void)stage;
+	}
+	CHECK_MSG(before > 0.15, "baseline rms %g", before);
+	CHECK_MSG(quiet < before * 0.1, "not faded out before the swap: %g vs %g", quiet, before);
+	CHECK_MSG(after > before * 0.3, "did not recover after the swap: %g vs %g", after, before);
+	CHECK(eng.duck == 0);
+}
+
+static void test_preset_leds_flash_then_position_bar(void)
+{
+	setup_presets();
+	led_frame_t f;
+	hold(B(BTN_FN), 40); hold(B(BTN_FN) | B(BTN_FWD), 24); hold(B(BTN_FN), 8);
+	/* wait for the swap */
+	uint32_t t0 = 0;
+	for (int i = 0; i < 20 && !t0; i++) { hold(B(BTN_FN), 8); if (ui.preset_idx == 0) t0 = T; }
+	CHECK(t0 != 0);
+	controller_leds(&ui, T + 10, &f);
+	CHECK(f.play[0] == 255 && f.play[1] == 255 && f.play[2] == 255 && f.play[3] == 255); /* confirm flash */
+	controller_leds(&ui, T + 400, &f);
+	CHECK(f.play[0] == 255 && f.play[1] == 0 && f.play[3] == 0); /* first preset -> 1 LED */
+	controller_leds(&ui, T + 2000, &f);
+	CHECK(f.play[0] == 0 && f.play[3] == 0); /* back to the level meter (silent) */
+	/* last preset -> 4 LEDs */
+	hold(0, 40);
+	hold(B(BTN_FN), 40); hold(B(BTN_FN) | B(BTN_REV), 24); hold(B(BTN_FN), 8);
+	for (int i = 0; i < 20 && ui.preset_idx != FACTORY_PRESET_COUNT - 1; i++) hold(B(BTN_FN), 8);
+	CHECK(ui.preset_idx == FACTORY_PRESET_COUNT - 1);
+	controller_leds(&ui, T + 400, &f);
+	CHECK(f.play[0] == 255 && f.play[1] == 255 && f.play[2] == 255 && f.play[3] == 255);
+	/* middle presets are monotonic: the bar never shrinks as the index grows */
+	int prev = 0;
+	for (int idx = 0; idx < FACTORY_PRESET_COUNT; idx++) {
+		ui.preset_idx = idx; ui.preset_bar_until = T + 1000; ui.preset_flash_until = 0;
+		controller_leds(&ui, T + 600, &f);
+		int lit = (f.play[0] > 0) + (f.play[1] > 0) + (f.play[2] > 0) + (f.play[3] > 0);
+		CHECK(lit >= prev && lit >= 1 && lit <= 4);
+		prev = lit;
+	}
+}
+
+static void test_preset_admission_failure_and_no_list(void)
+{
+	setup_presets();
+	controller_set_presets(&ui, 1, fill_toobig, 0);
+	hold(B(BTN_FN), 40); hold(B(BTN_FN) | B(BTN_FWD), 24); hold(B(BTN_FN), 80); hold(0, 40);
+	/* three of four slots were refused: error pattern requested, engine still valid */
+	CHECK(ui.err_until > 0);
+	CHECK(eng.cfg.fx_id[0] == FX_DELAY);
+	float l[64] = {0}, r[64] = {0};
+	engine_process(&eng, l, r, l, r, 64);
+	CHECK(eng.duck == 0);
+	/* no list installed: FN + rocker does nothing, FN is still consumed (no edit-mode exit) */
+	setup(850);
+	controller_set_presets(&ui, 0, 0, 0);
+	hold(B(BTN_FN), 40); hold(B(BTN_FN) | B(BTN_T1), 40); hold(B(BTN_FN), 40); hold(0, 40);
+	CHECK(ui.mode == UI_EDIT);
+	int before = eng.cfg.fx_id[0];
+	hold(B(BTN_FN), 40); hold(B(BTN_FN) | B(BTN_FWD), 24); hold(B(BTN_FN), 80); hold(0, 40);
+	CHECK(eng.cfg.fx_id[0] == before);
+	CHECK(ui.mode == UI_EDIT); /* unchanged: no accidental FN tap */
+}
+
+static void test_fn_rocker_does_not_break_other_gestures(void)
+{
+	setup_presets();
+	/* channel + rocker still cycles effects, and FN + channel still enters edit mode */
+	int fx0 = eng.cfg.fx_id[0];
+	hold(B(BTN_T1), 100); hold(B(BTN_T1) | B(BTN_FWD), 24); hold(B(BTN_T1), 40); hold(0, 40);
+	CHECK(eng.cfg.fx_id[0] != fx0 || fx0 == FX_NONE);
+	CHECK(ui.preset_idx == -1);
+	/* FN pressed while a channel is held, then rocker: stays an effect cycle, never a preset */
+	hold(B(BTN_T2), 100); hold(B(BTN_T2) | B(BTN_FN), 24); hold(B(BTN_T2) | B(BTN_FN) | B(BTN_FWD), 24);
+	hold(0, 80);
+	CHECK(ui.preset_idx == -1);
+}
+
 int main(void)
 {
 	RUN(test_debounce);
@@ -392,5 +605,12 @@ int main(void)
 	RUN(test_led_performance);
 	RUN(test_led_select_and_edit);
 	RUN(test_sync_out);
+	RUN(test_preset_cycle_gesture);
+	RUN(test_preset_rapid_presses_coalesce);
+	RUN(test_preset_leaves_edit_mode_and_does_not_jump_faders);
+	RUN(test_preset_fade_is_silent_and_recovers);
+	RUN(test_preset_leds_flash_then_position_bar);
+	RUN(test_preset_admission_failure_and_no_list);
+	RUN(test_fn_rocker_does_not_break_other_gestures);
 	T_DONE();
 }

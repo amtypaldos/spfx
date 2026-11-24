@@ -16,10 +16,11 @@ Evidence key: **[HOST]** verified by automated tests on a development Mac. **[SR
 | Companion (`companion/`) | Web Serial + demo device, Tape Looper-style UI, presets. 51 Node tests + headless browser smoke test. Never run against a real SP-1. |
 | Factory presets (`presets/`, `firmware/app/factory_presets.h`) | six presets, each runs through the real engine within budget. **[HOST]** |
 | Build (`docs/BUILD.md`, `firmware/scripts`, `firmware/app/zephyr_min`) | Zephyr **v4.3.1** (Tape Looper's lock file pins this, not 4.1) + SDK 0.17.4 in `../toolchain`. Minimal heartbeat/watchdog/FN-power-off image builds: 17,316 B at 0x20000, bit-identical across 3 clean builds, `check_image.py` passes. **Never run on a device.** |
+| Preset cycling (ADR-004) | FN + rocker, fade, flash + position bar, `PRESET_LOADED` event, C + companion. **[HOST]** Device-side user presets: **[TODO]** |
 | Guide (`docs/guide/`) | printable quick-reference (schematic device drawing). |
 
-## Test results (`make test`: 6 C suites; `node --test companion/tests/*.test.mjs`: 51; all pass)
-- Also: `test_storage` 1,426 checks, `test_protocol` 881, `test_presets` 557.
+## Test results (`make test`: 6 C suites; `node --test companion/tests/*.test.mjs`: 53; all pass)
+- Also: `test_storage` 1,426 checks, `test_protocol` 885, `test_presets` 557, `test_controls` 172.
 - `test_dsp`: 2,382 checks. Parameter map/unmap, silence, 16 parameter corners x every effect with loud noise, automation stability, stereo isolation, filter frequency response (LP/HP), delay timing exact to the sample, feedback ratio, reverb decay, chorus delay, tremolo depth, compressor level, fast-math accuracy, recovery after NaN.
 - `test_engine`: 36,924 checks. Wet/dry, bypass, global bypass, assignment preserves wet/bypass and per-effect params, memory + CPU admission with rollback, 2,000 random reassignments never overlap memory, multiple instances, NaN/Inf input, hot-signal limiter, no pops when switching effects, tails survive bypass, config repair, chain order.
 - `test_controls`: 119 checks. Debounce, tap vs hold, rocker only on held channel (and only if pressed after it), wrap-around, repeat, chord, PLAY, volume steps/repeat, edit mode, soft takeover (approach, cross-over, jitter, NaN, resync), FN-hold power-off, admission error LED, LED encodings, sync scheduling over a simulated 10 min.

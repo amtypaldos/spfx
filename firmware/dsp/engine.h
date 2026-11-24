@@ -57,7 +57,9 @@ typedef struct {
 	uint32_t tail_rem[ENGINE_SLOTS];
 	uint8_t active[ENGINE_SLOTS];
 	float ingain_cur, master_cur;
-	float k_mix, k_in, k_gain, k_master;
+	float k_mix, k_in, k_gain, k_master, k_duck;
+	uint8_t duck;       /* control thread: 1 = fade output to silence (~20 ms), 0 = fade back */
+	float duck_cur;
 
 	engine_diag_t diag;
 } engine_t;
@@ -80,6 +82,8 @@ void engine_set_bypass(engine_t *e, int slot, int bypass);
 void engine_set_global_bypass(engine_t *e, int on);
 void engine_set_input_gain_db(engine_t *e, float db);
 void engine_set_master(engine_t *e, float v);
+/* Fade the output to silence (and back). Used around preset swaps so tails are not cut with a click. */
+void engine_set_duck(engine_t *e, int on);
 int engine_set_order(engine_t *e, const uint8_t order[ENGINE_SLOTS]); /* 0 ok, -1 invalid */
 
 /* How much of the budget is spoken for (declared values). */

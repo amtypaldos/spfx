@@ -1,6 +1,7 @@
 /* Device protocol (docs/PROTOCOL.md v1): primitives, every message, events, meters,
  * robustness, and interoperability with the companion's JS implementation (golden_frames.h). */
 #include "t.h"
+#include "../firmware/app/factory_presets.h"
 #include "../firmware/protocol/protocol.h"
 #include "golden_frames.h"
 
@@ -873,6 +874,31 @@ static void test_factory_reset(void)
 	if (nfr == 1) check_state_payload(&frames[0]);
 }
 
+
+static int fill_fp(void *ctx, int idx, store_data_t *out)
+{
+	(void)ctx;
+	if (idx < 0 || idx >= FACTORY_PRESET_COUNT) return -1;
+	factory_preset_fill(&factory_presets[idx], out);
+	return 0;
+}
+
+static void test_preset_loaded_event(void)
+{
+	setup_budget(ENGINE_DEFAULT_CPU_BUDGET);
+	controller_set_presets(&ui, FACTORY_PRESET_COUNT, fill_fp, 0);
+	hold(0, 40);
+	clear_tx();
+	/* FN + FWD loads preset 0 on the device: one PRESET_LOADED, no per-control events */
+	hold(B(BTN_FN), 40); hold(B(BTN_FN) | B(BTN_FWD), 24); hold(B(BTN_FN), 80); hold(0, 80);
+	CHECK(count_type(PT_PRESET_LOADED) == 1);
+	CHECK(count_type(PT_EVENT) == 0);
+	const frm_t *f = last_of(PT_PRESET_LOADED);
+	CHECK(f != 0);
+	/* tempo follows the preset (120 BPM in the factory table) */
+	CHECK_NEAR(pr.bpm, factory_presets[0].bpm, 0.06);
+}
+
 int main(void)
 {
 	RUN(test_crc16);
@@ -888,6 +914,7 @@ int main(void)
 	RUN(test_admission);
 	RUN(test_no_echo_of_host_changes);
 	RUN(test_device_events);
+	RUN(test_preset_loaded_event);
 	RUN(test_subscribe_timing);
 	RUN(test_meters_content);
 	RUN(test_factory_reset);

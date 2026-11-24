@@ -5,8 +5,8 @@
 @page{size:210mm 297mm;margin:0}
 *{box-sizing:border-box}
 html,body{margin:0;background:#faf8f4}
-body{width:1412px;height:2000px;position:relative;overflow:hidden;font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;color:#1a1a1a;font-size:15px;line-height:1.45}
-@media print{html{zoom:.5598}}
+body{width:1412px;height:2060px;position:relative;overflow:hidden;font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;color:#1a1a1a;font-size:15px;line-height:1.45}
+@media print{html{zoom:.5435}}
 :root{--red:#d9503b;--line:#dcd7cf;--grey:#777}
 h1{position:absolute;left:42px;top:26px;margin:0;font-size:46px;letter-spacing:.5px;font-weight:800;line-height:1.1}
 .wip{position:absolute;left:254px;top:38px;border:2px solid var(--red);color:var(--red);border-radius:6px;padding:2px 18px;font-weight:700;font-size:16px}
@@ -99,11 +99,12 @@ td b{display:block;font-weight:600}td span{color:var(--grey);font-size:12.5px}
 <div class="c" style="left:942px;top:110px;width:428px;height:84px"><h2>Play</h2>
 <div class="r"><b>tap</b><span>global effects bypass</span></div>
 </div>
-<div class="c" style="left:942px;top:226px;width:428px;height:170px"><h2>Function (FN)</h2>
+<div class="c" style="left:942px;top:209px;width:428px;height:198px"><h2>Function (FN)</h2>
 <div class="r"><b>FN + T1&ndash;T4</b><span>edit that slot's parameters</span></div>
+<div class="r"><b>FN + FWD / REV</b><span>next / previous preset (hold to repeat)</span></div>
 <div class="r"><b>tap FN again</b><span>back to performance mode</span></div>
 <div class="r"><b>hold 1.5 s</b><span>power off / return to the bootloader</span></div></div>
-<div class="c" style="left:942px;top:412px;width:428px;height:228px"><h2>Jacks &amp; USB</h2>
+<div class="c" style="left:942px;top:421px;width:428px;height:219px"><h2>Jacks &amp; USB</h2>
 <div class="r"><b>Headphone jack</b><span>audio output (headphones / speaker)</span></div>
 <div class="r"><b>SYNC jack</b><span>MIDI clock + Pocket Operator sync OUT. Not audio.</span></div>
 <div class="r"><b>USB-C</b><span>audio in from a computer or phone; processed audio goes back to the host.</span></div></div>
@@ -148,7 +149,8 @@ td b{display:block;font-weight:600}td span{color:var(--grey);font-size:12.5px}
   <p class="h">Channel held + rocker</p><p>The held channel's LED pulses.</p>
   <p class="h">Change succeeds</p><p>The four LEDs beside PLAY flash all together.</p>
   <p class="h">Slot set to None</p><p>The four LEDs beside PLAY show a steady dim row.</p>
-  <p class="h">Change refused</p><p>The four LEDs beside PLAY flash alternately.</p></div>
+  <p class="h">Change refused</p><p>The four LEDs beside PLAY flash alternately.</p>
+  <p class="h">Preset loaded (FN + rocker)</p><p>The four LEDs beside PLAY flash, then a 1&ndash;4 LED bar shows your place in the list.</p></div>
  <div class="b"><h2>Edit mode</h2>
   <p class="h">Track LEDs</p><p>The four track LEDs show the four parameter values.</p>
   <p class="h">LEDs beside PLAY</p><p>One LED pulses slowly to show which slot is being edited: LED 1&ndash;4 = slot 1&ndash;4.</p></div>

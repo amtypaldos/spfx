@@ -94,6 +94,11 @@ export class Controller {
   _event(msg) {
     if (msg.type === T.EVENT) this.store.update((m) => { applySetter(m, msg.setter); });   // never echoed back to the device
     else if (msg.type === T.METERS) this.store.update((m) => applyMeters(m, msg));
+    else if (msg.type === T.PRESET_LOADED) {
+      // the device switched preset by itself (FN + rocker): everything changed, so re-read it all
+      this.notice('info', `Device loaded preset ${msg.idx + 1}.`);
+      this.refreshState().catch(() => {});
+    }
     else if (msg.type === T.ADMISSION_ERROR) {
       this.notice('error', `The device could not switch slot ${msg.slot + 1} to ${this.fxName(msg.fx)}: ${RESULT_TEXT[msg.code] ?? 'rejected'}. Slot unchanged.`);
     }

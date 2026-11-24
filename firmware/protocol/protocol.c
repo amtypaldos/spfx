@@ -462,6 +462,21 @@ static void drain_events(proto_t *p)
 			send_event(p, PT_SET_MASTER, pl, 2);
 			break;
 		}
+		case CTL_EV_PRESET: {
+			/* everything changed: drop stale per-control events, tell the host to re-read state */
+			for (int sl = 0; sl < ENGINE_SLOTS; sl++) {
+				p->ev_wet[sl].pending = 0;
+				for (int i = 0; i < FX_MAX_PARAMS; i++) p->ev_param[sl][i].pending = 0;
+			}
+			if (ev.v >= 30.0f && ev.v <= 300.0f) {
+				p->bpm = ev.v;
+				if (p->c.sync) sync_out_set_bpm(p->c.sync, p->bpm);
+			}
+			uint16_t b10 = (uint16_t)(p->bpm * 10.0f + 0.5f);
+			uint8_t pl[3] = {ev.a, (uint8_t)b10, (uint8_t)(b10 >> 8)};
+			send(p, PT_PRESET_LOADED, 0, pl, 3);
+			break;
+		}
 		case CTL_EV_ADMISSION: {
 			uint8_t pl[3] = {ev.slot, ev.a, map_status((engine_status)ev.b)};
 			send(p, PT_ADMISSION_ERROR, 0, pl, 3);

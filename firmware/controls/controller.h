@@ -5,6 +5,7 @@
 
 #include "controls.h"
 #include "../dsp/engine.h"
+#include "../storage/config_store.h"
 
 typedef enum { UI_PERFORM = 0, UI_EDIT = 1 } ui_mode;
 
@@ -24,7 +25,8 @@ typedef enum {
 	CTL_EV_SLOT_FX,           /* slot, a = fx id */
 	CTL_EV_GLOBAL_BYPASS,     /* a = on */
 	CTL_EV_MASTER,            /* v */
-	CTL_EV_ADMISSION          /* slot, a = rejected fx id, b = engine_status */
+	CTL_EV_ADMISSION,         /* slot, a = rejected fx id, b = engine_status */
+	CTL_EV_PRESET             /* a = preset index just loaded: the host should re-read the whole state */
 } ctl_event_kind;
 
 typedef struct {
@@ -54,6 +56,15 @@ typedef struct {
 	uint32_t change_seq; /* increments on any user-visible state change (companion / persistence) */
 	uint32_t last_change_ms;
 
+	/* presets (FN + rocker). The list is supplied by the app: factory presets, then user presets. */
+	int preset_count;
+	int (*preset_fill)(void *ctx, int idx, store_data_t *out); /* 0 = ok */
+	void *preset_ctx;
+	int preset_idx;        /* last loaded preset, -1 = working config not from a preset */
+	int preset_pending;    /* target while the fade-out runs, -1 none */
+	uint32_t preset_apply_at, preset_flash_until, preset_bar_until;
+	float preset_bpm;      /* tempo of the last loaded preset (the app forwards it to sync/protocol) */
+
 	ctl_event_t ev[CTL_EVENT_CAP];
 	uint8_t ev_head, ev_count;
 	uint32_t ev_dropped;
@@ -64,6 +75,11 @@ void controller_init(controller_t *c, engine_t *e);
 void controller_tick(controller_t *c, uint32_t now_ms, uint16_t buttons, const float fader[4]);
 /* Re-arm soft takeover after the state was changed from elsewhere (companion, preset load). */
 void controller_resync(controller_t *c);
+/* Install the preset list. count 0 disables FN + rocker. */
+void controller_set_presets(controller_t *c, int count, int (*fill)(void *ctx, int idx, store_data_t *out), void *ctx);
+#define PRESET_FADE_MS 25u
+#define PRESET_FLASH_MS 250u
+#define PRESET_BAR_MS 1400u
 /* Pop the oldest device-originated event; returns 0 if none. */
 int controller_pop_event(controller_t *c, ctl_event_t *out);
 void controller_leds(const controller_t *c, uint32_t now_ms, led_frame_t *out);

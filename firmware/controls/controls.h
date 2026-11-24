@@ -34,7 +34,8 @@ typedef enum {
 	GE_VOL,           /* arg = +1/-1 (with auto-repeat) */
 	GE_POWER_OFF,     /* FN held 1.5 s: return to bootloader */
 	GE_CHAN_DOWN,     /* arg = slot: a channel button went down (for UI) */
-	GE_CHAN_UP        /* arg = slot */
+	GE_CHAN_UP,       /* arg = slot */
+	GE_CYCLE_PRESET   /* arg = +1/-1: FN + rocker (repeats while held) */
 } gesture_type;
 
 typedef struct {

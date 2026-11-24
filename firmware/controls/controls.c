@@ -80,6 +80,7 @@ int gesture_update(gesture_t *g, uint16_t mask, uint32_t now, gesture_event_t *e
 		if (g->fn_down && !g->fn_consumed && !g->fn_long_sent && (now - g->fn_t) < GESTURE_TAP_MAX_MS)
 			emit(ev, &n, GE_FN_TAP, 0, 0);
 		g->fn_down = 0;
+		if (g->rk_slot == -2) { g->rk_dir = 0; g->rk_slot = -1; }
 	}
 	if (released & BTN_BIT(BTN_PLAY)) {
 		if (g->play_down && !g->play_consumed && (now - g->play_t) < GESTURE_TAP_MAX_MS)
@@ -141,6 +142,13 @@ int gesture_update(gesture_t *g, uint16_t mask, uint32_t now, gesture_event_t *e
 			g->rk_slot = (int8_t)slot;
 			g->rk_next = now + GESTURE_ROCKER_DELAY_MS;
 			emit(ev, &n, GE_CYCLE_FX, slot, dir);
+		} else if (g->fn_down && !any_channel_down(g) && !g->play_down) {
+			/* FN + rocker: previous/next preset. FN is consumed so its release is not a tap. */
+			g->fn_consumed = 1;
+			g->rk_dir = (int8_t)dir;
+			g->rk_slot = -2;
+			g->rk_next = now + GESTURE_ROCKER_DELAY_MS;
+			emit(ev, &n, GE_CYCLE_PRESET, dir, 0);
 		}
 	}
 	for (int d = 0; d < 2; d++) {
@@ -155,6 +163,11 @@ int gesture_update(gesture_t *g, uint16_t mask, uint32_t now, gesture_event_t *e
 	/* ---- timed behaviour ---- */
 	if (g->rk_dir != 0 && g->rk_slot >= 0 && g->chan_down[g->rk_slot] && now >= g->rk_next) {
 		emit(ev, &n, GE_CYCLE_FX, g->rk_slot, g->rk_dir);
+		g->rk_next += GESTURE_ROCKER_REPEAT_MS;
+		if (g->rk_next <= now) g->rk_next = now + GESTURE_ROCKER_REPEAT_MS;
+	}
+	if (g->rk_dir != 0 && g->rk_slot == -2 && g->fn_down && now >= g->rk_next) {
+		emit(ev, &n, GE_CYCLE_PRESET, g->rk_dir, 0);
 		g->rk_next += GESTURE_ROCKER_REPEAT_MS;
 		if (g->rk_next <= now) g->rk_next = now + GESTURE_ROCKER_REPEAT_MS;
 	}

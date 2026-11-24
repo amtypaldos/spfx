@@ -71,6 +71,8 @@ void engine_init(engine_t *e, void *pool, uint32_t pool_bytes, float sr, uint32_
 	e->k_in = fx_coef(0.005f, sr);
 	e->k_gain = fx_coef(0.010f, sr);
 	e->k_master = fx_coef(0.020f, sr);
+	e->k_duck = fx_coef(0.004f, sr);
+	e->duck_cur = 1.0f;
 	e->ingain_cur = 1.0f;
 	e->master_cur = 0.0f; /* fade up from silence on start */
 }
@@ -169,6 +171,8 @@ void engine_set_bypass(engine_t *e, int slot, int bypass)
 	if (slot < 0 || slot >= ENGINE_SLOTS) return;
 	e->cfg.bypass[slot] = bypass ? 1 : 0;
 }
+
+void engine_set_duck(engine_t *e, int on) { e->duck = on ? 1 : 0; }
 
 void engine_set_global_bypass(engine_t *e, int on) { e->cfg.global_bypass = on ? 1 : 0; }
 
@@ -335,10 +339,12 @@ void engine_process(engine_t *e, const float *in_l, const float *in_r, float *ou
 
 		float mg_t = master_gain(e->cfg.master);
 		float mg = e->master_cur;
+		float dk = e->duck_cur, dk_t = e->duck ? 0.0f : 1.0f;
 		float opk = 0.0f;
 		for (int i = 0; i < m; i++) {
 			mg += e->k_master * (mg_t - mg);
-			float a = L[i] * mg, b = R[i] * mg;
+			dk += e->k_duck * (dk_t - dk);
+			float a = L[i] * mg * dk, b = R[i] * mg * dk;
 			float pa = fabsf(a), pb = fabsf(b);
 			if (pa > opk) opk = pa;
 			if (pb > opk) opk = pb;
@@ -347,6 +353,7 @@ void engine_process(engine_t *e, const float *in_l, const float *in_r, float *ou
 			out_r[done + i] = soft_limit(b);
 		}
 		e->master_cur = mg;
+		e->duck_cur = dk;
 		e->diag.out_peak = opk > e->diag.out_peak ? opk : e->diag.out_peak;
 		e->diag.blocks++;
 		done += m;

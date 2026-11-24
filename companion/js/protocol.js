@@ -20,7 +20,7 @@ export const T = Object.freeze({
   SET_MASTER: 0x15, SET_INPUT_GAIN: 0x16, SET_ORDER: 0x17, SET_BPM: 0x18,
   SAVE_NOW: 0x20, FACTORY_RESET: 0x21, SUBSCRIBE: 0x30,
   HELLO_RSP: 0x81, FX_DESC: 0x82, STATE: 0x83, RESULT: 0x90,
-  EVENT: 0xA0, ADMISSION_ERROR: 0xA1, METERS: 0xA2,
+  EVENT: 0xA0, ADMISSION_ERROR: 0xA1, METERS: 0xA2, PRESET_LOADED: 0xA3,
 });
 export const TYPE_NAMES = Object.freeze(Object.fromEntries(Object.entries(T).map(([k, v]) => [v, k])));
 export const SETTER_TYPES = Object.freeze([
@@ -206,6 +206,7 @@ export function encodePayload(msg) {
       w.u8(msg.setter.type); w.a.push(...encodePayload(msg.setter)); break;
     }
     case T.ADMISSION_ERROR: w.u8(msg.slot).u8(msg.fx).u8(msg.code); break;
+    case T.PRESET_LOADED: w.u8(msg.idx).u16(msg.bpm10); break;
     case T.METERS:
       w.u16(msg.inPeak).u16(msg.outPeak).u8(msg.cpuPct).u8(msg.cpuPeakPct).u32(msg.memUsed)
         .u32(msg.inClips).u32(msg.outClips).u32(msg.underruns).u32(msg.overruns).u32(msg.nanEvents)
@@ -264,6 +265,7 @@ export function decodePayload(type, payload) {
       return { type, setter: decodePayload(st, payload.subarray(1)) };
     }
     case T.ADMISSION_ERROR: m = { type, slot: checkSlot(r.u8()), fx: r.u8(), code: r.u8() }; break;
+    case T.PRESET_LOADED: m = { type, idx: r.u8(), bpm10: r.u16() }; break;
     case T.METERS:
       m = { type, inPeak: r.u16(), outPeak: r.u16(), cpuPct: r.u8(), cpuPeakPct: r.u8(), memUsed: r.u32(),
         inClips: r.u32(), outClips: r.u32(), underruns: r.u32(), overruns: r.u32(), nanEvents: r.u32(),

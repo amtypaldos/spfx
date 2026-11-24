@@ -228,3 +228,10 @@ test('RESULT, EVENT, ADMISSION_ERROR, METERS round trip', () => {
   assert.deepEqual(decodePayload(T.METERS, encodePayload(mt)), mt);
   assert.equal(decodePayload(T.METERS, encodePayload({ ...mt, globalBypass: false })).globalBypass, false);
 });
+
+test('PRESET_LOADED (0xA3) round trip', () => {
+  const f = buildFrame({ type: T.PRESET_LOADED, idx: 5, bpm10: 1234 }, 0);
+  const r = parseFrame(decodeFrame(f.subarray(0, f.length - 1)));
+  assert.ok(r.ok);
+  assert.deepEqual(r.msg, { type: T.PRESET_LOADED, idx: 5, bpm10: 1234 });
+});

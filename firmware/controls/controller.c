@@ -21,6 +21,15 @@ static void rearm(controller_t *c)
 
 void controller_resync(controller_t *c) { rearm(c); }
 
+void controller_set_presets(controller_t *c, int count, int (*fill)(void *, int, store_data_t *), void *ctx)
+{
+	c->preset_count = (count > 0 && fill) ? count : 0;
+	c->preset_fill = fill;
+	c->preset_ctx = ctx;
+	c->preset_idx = -1;
+	c->preset_pending = -1;
+}
+
 static void changed(controller_t *c, uint32_t now)
 {
 	c->change_seq++;
@@ -61,6 +70,8 @@ void controller_init(controller_t *c, engine_t *e)
 	c->held_slot = -1;
 	c->edit_slot = 0;
 	c->last_master_step = -1;
+	c->preset_idx = -1;
+	c->preset_pending = -1;
 	rearm(c);
 }
 
@@ -134,6 +145,16 @@ static void handle(controller_t *c, const gesture_event_t *ev, uint32_t now)
 		push_ev(c, CTL_EV_MASTER, 0, 0, 0, e->cfg.master);
 		break;
 	}
+	case GE_CYCLE_PRESET: {
+		if (c->preset_count <= 0) break;
+		int base = c->preset_pending >= 0 ? c->preset_pending : c->preset_idx;
+		if (base < 0) base = ev->arg > 0 ? -1 : 0; /* first press: forward -> first preset, back -> last */
+		int n = c->preset_count;
+		c->preset_pending = ((base + ev->arg) % n + n) % n;
+		c->preset_apply_at = now + PRESET_FADE_MS; /* every further press re-arms the fade */
+		engine_set_duck(c->eng, 1);
+		break;
+	}
 	case GE_POWER_OFF:
 		c->power_off_request = 1;
 		break;
@@ -144,6 +165,24 @@ static void handle(controller_t *c, const gesture_event_t *ev, uint32_t now)
 
 void controller_tick(controller_t *c, uint32_t now, uint16_t buttons, const float fader[4])
 {
+	if (c->preset_pending >= 0 && (int32_t)(now - c->preset_apply_at) >= 0) {
+		store_data_t d;
+		int idx = c->preset_pending;
+		c->preset_pending = -1;
+		if (c->preset_fill && c->preset_fill(c->preset_ctx, idx, &d) == 0) {
+			int rejected = engine_apply_config(c->eng, &d.cfg);
+			c->mode = UI_PERFORM;
+			c->preset_idx = idx;
+			c->preset_bpm = d.bpm;
+			c->preset_flash_until = now + PRESET_FLASH_MS;
+			c->preset_bar_until = now + PRESET_BAR_MS;
+			if (rejected > 0) c->err_until = now + 700;
+			rearm(c);
+			push_ev(c, CTL_EV_PRESET, 0, idx, 0, d.bpm);
+			changed(c, now);
+		}
+		engine_set_duck(c->eng, 0);
+	}
 	uint16_t stable = debounce_update(&c->deb, buttons);
 	gesture_event_t ev[GESTURE_MAX_EVENTS];
 	int n = gesture_update(&c->gest, stable, now, ev);
@@ -248,6 +287,17 @@ void controller_leds(const controller_t *c, uint32_t now, led_frame_t *o)
 			continue;
 		}
 		o->track[i] = level_led(cfg->wet[i], c->to[i].picked ? 0 : c->to[i].need, now);
+	}
+	/* just-loaded preset: confirm flash on the four PLAY-side LEDs, then a bar showing the place in
+	 * the list (1..4 LEDs; a position cue, not a number). Takes priority over the level meter. */
+	if (c->preset_idx >= 0 && now < c->preset_bar_until && now >= c->preset_bar_until - PRESET_BAR_MS && now >= c->err_until) {
+		if (now < c->preset_flash_until) {
+			for (int i = 0; i < 4; i++) o->play[i] = 255;
+		} else {
+			int lit = c->preset_count > 1 ? 1 + (c->preset_idx * 3) / (c->preset_count - 1) : 1;
+			for (int i = 0; i < 4; i++) o->play[i] = i < lit ? 255 : 0;
+		}
+		return;
 	}
 	/* output level on the four PLAY-side LEDs */
 	if (now >= c->err_until) {
