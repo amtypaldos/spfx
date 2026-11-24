@@ -1569,6 +1569,8 @@ static unsigned int share10(uint64_t part, uint64_t whole)
 	return whole ? (unsigned int)((part * 1000u + whole / 2u) / whole) : 0u;
 }
 
+static uint32_t ovl_period_max;   /* highest guard-window mean since the last D line */
+
 static void log_diag(uint32_t now, bool detail)
 {
 	static uint32_t prev_frames_in, prev_sof, prev_blocks;
@@ -1578,7 +1580,8 @@ static void log_diag(uint32_t now, bool detail)
 	const uint32_t fin = g_usb_frames_in, sof = g_sof_count, b = g_blocks;
 
 	con_printf("D t=%u preset=%d:%s cpu%%_avg/max=%u.%u/%u.%u blk%%_avg/max=%u.%u/%u.%u%s "
-		   "ovh_max=%u spikes>85%%=%u ovl win=%u.%u%% max=%u.%u%% shed=0x%x forced=%u "
+		   "ovh_max=%u spikes>85%%=%u ovl win=%u.%u%% win_max_period=%u.%u%% max=%u.%u%% "
+		   "shed=0x%x forced=%u "
 		   "vol=%d dB\r\n",
 		   now / 1000u, ui.preset_idx + 1, preset_name(ui.preset_idx),
 		   pct10(a.cyc_avg) / 10, pct10(a.cyc_avg) % 10, pct10(a.cyc_max) / 10,
@@ -1586,6 +1589,7 @@ static void log_diag(uint32_t now, bool detail)
 		   pct10(a.blk_max) / 10, pct10(a.blk_max) % 10, a_ok ? "" : "?",
 		   (unsigned int)a.ovh_max, (unsigned int)a.spikes,
 		   pct10(eng.diag.ovl_last_mean) / 10, pct10(eng.diag.ovl_last_mean) % 10,
+		   pct10(ovl_period_max) / 10, pct10(ovl_period_max) % 10,
 		   pct10(eng.diag.ovl_max_mean) / 10, pct10(eng.diag.ovl_max_mean) % 10,
 		   eng.diag.shed_mask, eng.diag.forced_bypass, idb(vol_master_db(eng.cfg.master)));
 	con_printf("  usb out=%s play=%d fill_min/avg/max=%u/%u/%u rx_f/s=%u sof/s=%u under=%u "
@@ -1602,6 +1606,7 @@ static void log_diag(uint32_t now, bool detail)
 		   (unsigned int)((b - prev_blocks) * 1000u / CONFIG_SP1FX_DIAG_PERIOD_MS),
 		   (unsigned int)g_err, (unsigned int)g_recover, out_name[cur_out], hp_raw,
 		   quiet_ok(&g_quiet, QUIET_BLOCKS) ? 1u : 0u);
+	ovl_period_max = 0;
 	prev_frames_in = fin;
 	prev_sof = sof;
 	prev_blocks = b;
@@ -1818,7 +1823,7 @@ int main(void)
 	apply_out(wanted_out());
 
 	/* If FUNCTION is still held from the wake-up press, hide it from the controller until
-	 * it has been released once, so that press cannot become a 1.5 s power-off hold. */
+	 * it has been released once, so that press cannot become a power-off hold (3 s). */
 	bool fn_armed = !controls_hw_fn_pressed();
 	int64_t next = k_uptime_get();
 	uint32_t now = k_uptime_get_32();
@@ -1929,6 +1934,11 @@ int main(void)
 		stage(ST_STORE);
 		storage_tick(now);
 		stage(ST_LEDS);
+
+		/* guard windows end every 42.7 ms; keep the worst one of this diag period */
+		if (eng.diag.ovl_last_mean > ovl_period_max) {
+			ovl_period_max = eng.diag.ovl_last_mean;
+		}
 
 		/* ---- LEDs ---- */
 		led_frame_t f;
