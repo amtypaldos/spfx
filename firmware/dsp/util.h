@@ -88,6 +88,17 @@ static inline float fx_softclip(float x)
 	return x * (1.0f - x * x * (1.0f / 6.75f));
 }
 
+/* Feedback-path saturation (rc5): exactly linear up to |x| = 1.0, then a smooth knee (slope 1
+ * at the join) that approaches 1.9 -- below the +-2.0 rail of the 16-bit delay lines, so hot
+ * input plus high feedback rounds off instead of hard-clipping in fx_dl_q(). */
+static inline float fx_fbsat(float x)
+{
+	float a = fabsf(x);
+	if (a <= 1.0f) return x;
+	float y = 1.0f + 0.9f * fx_softclip((a - 1.0f) * (1.0f / 0.9f));
+	return x < 0.0f ? -y : y;
+}
+
 /* Cheap sine-ish LFO, phase in [0,1), output [-1,1]. ~3% shape error, fine for modulation. */
 static inline float fx_sin01(float p)
 {

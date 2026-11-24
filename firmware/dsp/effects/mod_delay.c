@@ -116,8 +116,8 @@ static void process(void *st, float *l, float *r, int n)
 		for (int i = i0; i < i0 + m; i++) {
 			float yl = fx_dl_read_at(bl, size, w, dl);
 			float yr = fx_dl_read_at(br, size, w, dr);
-			bl[w] = fx_dl_q(l[i] + fb * yl);
-			br[w] = fx_dl_q(r[i] + fb * yr);
+			bl[w] = fx_dl_q(fx_fbsat(l[i] + fb * yl));
+			br[w] = fx_dl_q(fx_fbsat(r[i] + fb * yr));
 			if (++w >= size) w = 0;
 			l[i] = yl;
 			r[i] = yr;

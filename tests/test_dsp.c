@@ -205,6 +205,44 @@ static void test_delay_time_and_feedback(void)
 	destroy(&j);
 }
 
+/* rc5: hot input + maximum feedback saturates gently (fx_fbsat) instead of pinning the
+ * 16-bit delay lines at the +-2.0 rail; below full scale nothing changes */
+static void test_feedback_saturation(void)
+{
+	/* the curve: identity up to 1, continuous, monotonic, bounded under the rail */
+	float prev = -10.0f;
+	for (float x = -6.0f; x <= 6.0f; x += 0.001f) {
+		float y = fx_fbsat(x);
+		CHECK(y >= prev - 1e-6f);
+		CHECK(fabsf(y) < 1.95f);
+		if (fabsf(x) <= 1.0f) CHECK(y == x);
+		prev = y;
+	}
+	CHECK_NEAR(fx_fbsat(1.0005f), 1.0005, 1e-3);   /* slope ~1 at the knee: no corner */
+	const int ids[3] = { FX_DELAY, FX_CHORUS, FX_FLANGER };
+	for (int k = 0; k < 3; k++) {
+		inst_t i = make(ids[k]);
+		const fx_desc *d = fx_get(ids[k]);
+		/* maximum feedback (Delay: param 1; Chorus/Flanger: param 2) */
+		setp(&i, ids[k] == FX_DELAY ? 1 : 2, d->params[ids[k] == FX_DELAY ? 1 : 2].max);
+		static float l[48000], r[48000];
+		int pinned = 0;
+		float peak = 0.0f;
+		for (int b = 0; b < 8; b++) {
+			for (int n = 0; n < 48000; n++) { l[n] = 1.8f * sinf((float)n * 0.05f); r[n] = -l[n]; }
+			run(&i, l, r, 48000);
+			for (int n = 0; n < 48000; n++) {
+				peak = fmaxf(peak, fabsf(l[n]));
+				if (fabsf(l[n]) >= 1.999f) pinned++;
+				CHECK(l[n] == l[n]);
+			}
+		}
+		CHECK_MSG(pinned == 0, "%s: %d samples at the +-2 rail", d->name, pinned);
+		CHECK(peak < 4.0f);
+		destroy(&i);
+	}
+}
+
 static void test_reverb_tail(void)
 {
 	inst_t i = make(FX_REVERB);
@@ -329,6 +367,7 @@ int main(void)
 	RUN(test_stereo_isolation);
 	RUN(test_filter_response);
 	RUN(test_delay_time_and_feedback);
+	RUN(test_feedback_saturation);
 	RUN(test_reverb_tail);
 	RUN(test_chorus_delay_position);
 	RUN(test_tremolo_depth);

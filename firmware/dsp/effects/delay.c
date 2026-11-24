@@ -96,8 +96,8 @@ static void process(void *st, float *l, float *r, int n)
 			if (++ia >= (int32_t)size) ia = 0;
 			lpl += a * (yl - lpl);
 			lpr += a * (yr - lpr);
-			bl[w] = fx_dl_q(l[i] + fb * (c1 * lpl + c * lpr));
-			br[w] = fx_dl_q(r[i] + fb * (c1 * lpr + c * lpl));
+			bl[w] = fx_dl_q(fx_fbsat(l[i] + fb * (c1 * lpl + c * lpr)));
+			br[w] = fx_dl_q(fx_fbsat(r[i] + fb * (c1 * lpr + c * lpl)));
 			if (++w >= size) w = 0;
 			l[i] = yl;
 			r[i] = yr;
@@ -115,8 +115,8 @@ static void process(void *st, float *l, float *r, int n)
 			float yr = fx_dl_read_at(br, size, w, dd);
 			lpl += a * (yl - lpl);
 			lpr += a * (yr - lpr);
-			bl[w] = fx_dl_q(l[i] + fb * (c1 * lpl + c * lpr));
-			br[w] = fx_dl_q(r[i] + fb * (c1 * lpr + c * lpl));
+			bl[w] = fx_dl_q(fx_fbsat(l[i] + fb * (c1 * lpl + c * lpr)));
+			br[w] = fx_dl_q(fx_fbsat(r[i] + fb * (c1 * lpr + c * lpl)));
 			if (++w >= size) w = 0;
 			l[i] = yl;
 			r[i] = yr;
