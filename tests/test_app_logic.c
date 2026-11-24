@@ -584,6 +584,46 @@ static void test_scanfsm_timeout_recovery(void)
 	CHECK(scanfsm_step(&f, 0x00000040u, 0) == SCAN_ACT_ABORT_START);
 }
 
+static void test_saveev(void)
+{
+	saveev_t s;
+	saveev_init(&s, 1000);
+	/* boot: nothing to save, ever, without a change */
+	for (uint32_t t = 1000; t < 400000; t += 100) CHECK(!saveev_due(&s, t, 1));
+	/* tweaks alone: only the 120 s safety timer (from the last save = boot) */
+	saveev_init(&s, 0);
+	saveev_tweak(&s, 10);
+	CHECK(!saveev_due(&s, 119999, 1) && saveev_due(&s, SAVE_SAFETY_MS, 1));
+	saveev_saved(&s, SAVE_SAFETY_MS);
+	CHECK(!saveev_due(&s, SAVE_SAFETY_MS + 300000, 1));
+	/* a preset burst (rocker repeat every 200 ms for 3 s) saves once, 1.5 s after the last */
+	saveev_init(&s, 0);
+	int saves = 0;
+	for (uint32_t t = 0; t < 10000; t += 8) {
+		if (t >= 1000 && t <= 4000 && t % 200 == 0) saveev_event(&s, t);
+		if (saveev_due(&s, t, 1)) { saves++; saveev_saved(&s, t); CHECK(t >= 4000 + SAVE_EVENT_SETTLE_MS && t < 4000 + SAVE_EVENT_SETTLE_MS + 8); }
+	}
+	CHECK(saves == 1);
+	/* high load: due but deferred until the load drops (no matter how long) */
+	saveev_init(&s, 0);
+	saveev_event(&s, 100);
+	for (uint32_t t = 100; t < 600000; t += 8) CHECK(!saveev_due(&s, t, 0));
+	CHECK(s.deferred_load > 1000);
+	CHECK(saveev_due(&s, 600000, 1));
+	/* a tweak after an event rides along with that event's save */
+	saveev_init(&s, 0);
+	saveev_event(&s, 0);
+	saveev_tweak(&s, 1000);
+	CHECK(saveev_due(&s, 1500, 1));
+	saveev_saved(&s, 1500);
+	CHECK(!s.dirty && !saveev_due(&s, 100000, 1));
+	/* power off / SAVE_NOW: the caller saves directly and reports it */
+	saveev_init(&s, 0);
+	saveev_tweak(&s, 5);
+	saveev_saved(&s, 6);
+	CHECK(!saveev_due(&s, 200000, 1));
+}
+
 int main(void)
 {
 	RUN(test_save_sched_rules);
@@ -599,5 +639,6 @@ int main(void)
 	RUN(test_preset_sequence_with_audio_stopped);
 	RUN(test_boot_and_standby);
 	RUN(test_scanfsm_timeout_recovery);
+	RUN(test_saveev);
 	T_DONE();
 }

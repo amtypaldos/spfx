@@ -39,6 +39,44 @@ void save_sched_erased(save_sched_t *s, uint32_t now)
 	s->last_erase_try_ms = now;
 }
 
+/* ---- event-based saving ---- */
+
+void saveev_init(saveev_t *s, uint32_t now)
+{
+	memset(s, 0, sizeof *s);
+	s->last_save_ms = now;
+}
+
+void saveev_tweak(saveev_t *s, uint32_t now)
+{
+	(void)now;
+	s->dirty = 1;
+}
+
+void saveev_event(saveev_t *s, uint32_t now)
+{
+	s->dirty = 1;
+	s->event = 1;
+	s->event_ms = now; /* a burst coalesces: the settle time counts from the last event */
+}
+
+int saveev_due(saveev_t *s, uint32_t now, int load_ok)
+{
+	if (!s->dirty) return 0;
+	int want = (s->event && now - s->event_ms >= SAVE_EVENT_SETTLE_MS) ||
+		   now - s->last_save_ms >= SAVE_SAFETY_MS;
+	if (!want) return 0;
+	if (!load_ok) { s->deferred_load++; return 0; }
+	return 1;
+}
+
+void saveev_saved(saveev_t *s, uint32_t now)
+{
+	s->dirty = 0;
+	s->event = 0;
+	s->last_save_ms = now;
+}
+
 /* ---- console mode ---- */
 
 void conmode_init(con_mode_t *m)

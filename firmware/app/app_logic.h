@@ -43,6 +43,31 @@ save_action_t save_sched_next(save_sched_t *s, uint32_t now_ms, int due, int nee
 			      int spare_dirty, int quiet);
 void save_sched_erased(save_sched_t *s, uint32_t now_ms);
 
+/* ---- 1b. event-based saving (owner decision, rc4) -------------------------------------
+ * A settings record is written after EVENTS, not after every tweak:
+ *   - a preset switch, leaving edit mode, an effect change in a slot, and the companion's
+ *     setting changes (effect, order, BPM, sync, output mode, factory reset) are events; a
+ *     burst of them (rocker auto-repeat) is saved once, SAVE_EVENT_SETTLE_MS after the last;
+ *   - tweaks (faders, VOL, bypass taps, the companion's wet/param/master/input gain) only mark
+ *     the state dirty; they go out with the next event, at power off, or by the safety timer:
+ *     dirty and nothing saved for SAVE_SAFETY_MS;
+ *   - nothing is saved while the load is high (the caller says so), nothing at boot;
+ *   - power off and the companion's SAVE_NOW save at once (not through this module).
+ * Trade-off: tweaks made since the last save are lost if the battery dies or the unit resets
+ * before the next event / power off / safety save. */
+#define SAVE_EVENT_SETTLE_MS 1500u
+#define SAVE_SAFETY_MS 120000u
+typedef struct {
+	uint8_t dirty, event;
+	uint32_t event_ms, last_save_ms;
+	uint32_t deferred_load;     /* due but held back by high load (ticks) */
+} saveev_t;
+void saveev_init(saveev_t *s, uint32_t now_ms);           /* boot: nothing dirty */
+void saveev_tweak(saveev_t *s, uint32_t now_ms);
+void saveev_event(saveev_t *s, uint32_t now_ms);          /* also marks dirty */
+int saveev_due(saveev_t *s, uint32_t now_ms, int load_ok); /* 1: start a save now */
+void saveev_saved(saveev_t *s, uint32_t now_ms);           /* a save completed (any path) */
+
 /* ---- 2. console mode ---------------------------------------------------------------- */
 typedef struct {
 	uint8_t open;              /* host has the port open (DTR) */
