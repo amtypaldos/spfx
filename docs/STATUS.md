@@ -2,7 +2,52 @@
 
 Evidence key: **[HW]** observed on the owner's SP-1 (owner-run; see the hardware log). **[HOST]** verified by automated tests on a development Mac. **[SRC]** from upstream source/docs or our own build output. **[UNTESTED]** built but never run. **[TODO]** not started. The integrated image v1-rc1 has **not** been run on an SP-1.
 
-## v1-rc3 (2026-11-24) -- NOT RUN ON HARDWARE
+## v1-rc4 (2026-11-24) -- NOT RUN ON HARDWARE
+
+`sp1fx-v1-rc4.bin`, SHA-256 `ae95d5caef17b36613dce3104ee03047a6ac381dcb0b4d5d79fd44511365ffbe`,
+151,504 B, check PASS, reproducible, 0 warnings; host: 12 suites pass, companion 56/56.
+
+**rc3 on hardware [HW, owner-run, console read live by the lead]:**
+- The register-level SAADC scanner works (ticks=38676 scans=38675, adc_to=0); all buttons,
+  faders, PLAY and VOL work; FN + FWD presets work; no resets.
+- Two **control-loop starvation near-misses**:
+  - 2.1 s with stage flash_w;
+  - 4.9 s with stage diag, i.e. formatting the diag block under starvation.
+  - Saves took up to 1.8 s.
+- CPU [HW]: total ~99 % (audio thread 77 %, USB threads usbd + udc_nrfx ~21 %, main 0.4 %,
+  idle < 1 %). Engine 66-81 % vs 46 % for Boom Bap on the profiling image. The engine figure
+  includes interrupt and USB-thread pre-emption during engine_process, so it is not a clean
+  DSP number.
+- The guard (engine cycles only) did not act.
+
+**rc4 changes:**
+- Guard on total block time; starvation shed from the audio thread (control loop 0.5 s
+  late and < 5 % idle) [HOST engine part].
+- Saves stepped at 32 B/tick, never under high load [HOST].
+- Event-based saving (owner decision) [HOST]: preset switch, edit/effect changes and the
+  companion's settings save 1.5 s after the last event; tweaks only at the next event, at
+  power off, SAVE_NOW, or after 120 s; nothing at boot. Trade-off documented in
+  BRINGUP_SP1FX.md.
+- Diagnostics off by default ('d'/'i' keys), one line per tick, effect names and per-thread
+  shares [UNTESTED].
+- Headphone-jack **Line out** mode [HOST policy/protocol/storage; levels CALCULATED, not
+  measured]: mixer 0 dB + trim 0 dB = +36 dB over headphones, ~1.0 Vrms at 0 dBFS (from
+  Cirrus' 35 mW / 30 ohm). Master drops 36 dB on the switch. New SET_OUTPUT_MODE (0x1A),
+  STATE trailing out_mode byte (companion updated; older companions reject it), journal
+  extension byte (older records read as headphones).
+- Preset LEDs: 7 rapid flashes then the bar [HOST].
+
+**Load analysis, open:**
+- The USB threads' 21 % with only audio streaming is large. Zephyr device_next handles every
+  1 ms frame (SOF, ISO OUT, explicit feedback IN) through two threads plus buffer
+  allocations; the size-optimised libc memcpy inside the stack is a suspect. Not measured
+  per event.
+- The integrated image's per-block overhead (whole block minus engine) is visible as blk% vs
+  cpu%.
+- Next: profile the USB path, and if the heavy presets stay above ~70 % total, a "lite"
+  reverb/delay mode (owner accepts grit). Not done in rc4.
+
+## v1-rc3 (2026-11-24) -- superseded by rc4 (ran on hardware, starvation near-misses)
 
 `sp1fx-v1-rc3.bin`, SHA-256 `ec36e3befc937ab229822cc036d2e7788865134261af7d61a5631c06f3fa7199`,
 149,612 B, check PASS, reproducible, 0 warnings, all host tests pass. (An interim rc3 build with
@@ -259,6 +304,7 @@ Next: owner runs fxprof -> replace the declared values with measured ones.
 - Minimal image: when USB is plugged in, FN-hold enters SYSTEM_OFF and the device may stay dark until FN is pressed or USB is replugged (Tape Looper soft-resets instead). Pins, PWM ownership of the LED pin, and watchdog-channel assumptions are unverified guesses from Tape Looper's source.
 
 ## Hardware log (owner-reported; no automated evidence)
+- 2026-11-24 (owner-run, console read live by the lead): `sp1fx-v1-rc3.bin`: controls fixed (scanner works), power on/off and presets fine, no resets; control-loop starvation near-misses at ~99 % CPU -> rc4.
 - 2026-11-24 (owner-run, console read live by the lead): `sp1fx-v1-rc2.bin` runs steadily (stalls=0, no crash); FN-hold power off (1.5 s) fired by accident while cycling presets; controls dead in some boots after a SAADC scan timeout; overload guard shed and stayed latched -> rc3.
 - 2026-11-24 (owner-run, console read by the lead): `sp1fx-v1-rc1.bin` resets by watchdog every ~6-20 s (see "v1-rc2" at the top). Superseded by rc2 (not yet run).
 - 2026-11-24: `sp1fx-min-heartbeat.bin` (SHA-256 18afab48...592667) flashed with Solderless to the spare unit; LED 1 blinks. This confirms: bootloader accepts an app linked at 0x20000, our reset/vector layout is valid, LED pin P0.29 is right.

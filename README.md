@@ -8,7 +8,7 @@ This is an unofficial hobby project. It is not affiliated with, endorsed by, or 
 
 **Development firmware. Only bring-up images have run on the owner's hardware, and nothing here is production-ready.** The evidence labels follow `docs/STATUS.md`.
 
-**Newest image: `sp1fx-v1-rc3.bin`, the integrated firmware (`firmware/app/zephyr_sp1fx`). Built and host-tested, NOT RUN ON HARDWARE yet.** rc1 reset by watchdog every few seconds on hardware; rc2 removes the suspected causes and records where a remaining hang happens (`docs/STATUS.md`). It combines USB audio + effects, buttons/faders/LEDs, VOL+/VOL- volume (2 dB steps, saved), the companion protocol on the USB serial port, settings saved to internal flash (0xFD000-0xFEFFF), and the sync jack (off by default, untested with gear). Owner test plan: `docs/BRINGUP_SP1FX.md`.
+**Newest image: `sp1fx-v1-rc4.bin`, the integrated firmware (`firmware/app/zephyr_sp1fx`). Built and host-tested, NOT RUN ON HARDWARE yet.** rc1 reset by watchdog every few seconds on hardware; rc2 removes the suspected causes and records where a remaining hang happens (`docs/STATUS.md`). It combines USB audio + effects, buttons/faders/LEDs, VOL+/VOL- volume (2 dB steps, saved), the companion protocol on the USB serial port, settings saved to internal flash (0xFD000-0xFEFFF), and the sync jack (off by default, untested with gear). Owner test plan: `docs/BRINGUP_SP1FX.md`.
 
 **Verified on hardware** (owner-observed, spare unit, 2026-11-24; see `docs/STATUS.md`):
 
@@ -33,7 +33,7 @@ Text summary of the controls, for readers who cannot see the image:
 - **Faders 1-4:** wet/dry mix of slots 1-4 in performance mode. In edit mode, the same faders set that effect's four parameters.
 - **T1-T4 tap:** toggle that slot's bypass.
 - **FN + T1-T4:** enter edit mode for that slot. **Tap FN again** to return to performance mode.
-- **FN + FWD/REV:** previous or next preset. Holding repeats.
+- **FN + FWD/REV:** previous or next preset. Holding repeats. The PLAY-side LEDs flash rapidly, then show the position bar.
 - **PLAY tap:** global bypass. A single LED walks across the track LEDs while bypassed.
 - **FN hold 4 s (alone):** power on and power off (integrated firmware rc3). The 8 LEDs fill one per 0.5 s (PLAY-side LEDs, then T1-T4). Pressing any other button during the hold cancels it. Plugging in USB does not switch the unit on; it charges and shows the charge state. (Older images: 1.5 s. The guide image still says 1.5 s; the HTML source is updated.)
 - **VOL- / VOL+:** master volume, 2 dB per press (-60 to 0 dB), shown as a bar on the PLAY-side LEDs. Holding repeats. Saved. (The guide image still says 16 steps; the HTML source is updated.)
@@ -147,7 +147,8 @@ Staged images are kept outside the repository, in `~/spfx/flash-ready/`. They ar
 | `sp1fx-usbaudio-in-v3.bin` | USB audio in, A, v3 (optimised DSP, overload guard). Runs on the owner's unit (presets ~50 % CPU). |
 | `sp1fx-v1-rc1.bin` | Integrated firmware rc1. **Resets by watchdog on hardware.** Superseded. |
 | `sp1fx-v1-rc2.bin` | Integrated firmware rc2 (reset fixes + stall recorder). Ran on the owner's unit; FN-hold power off too easy to hit. Superseded. |
-| `sp1fx-v1-rc3.bin` | **Integrated firmware rc3**: controls fix (own SAADC scan), 4 s FN power on/off with 8-LED fill, charge standby, overload guard recovery. Not run on hardware yet. Test plan: `docs/BRINGUP_SP1FX.md`. |
+| `sp1fx-v1-rc3.bin` | Integrated firmware rc3: controls fix, 4 s power on/off, charge standby. Ran on the owner's unit; control-loop starvation near-misses under heavy load. Superseded. |
+| `sp1fx-v1-rc4.bin` | **Integrated firmware rc4**: total-load guard + starvation net, stepped event-based saving, diagnostics off by default, headphone-jack Line out mode, rapid preset flash. Not run on hardware yet. Test plan: `docs/BRINGUP_SP1FX.md`. Needs the companion from the same commit. |
 | `RECOVERY-tape-looper-from-repo.bin` | Tape Looper release, recovery only. Not built from this repository. |
 
 Bring-up procedures and pass/fail checklists are in `docs/BRINGUP_SP1FX.md` (integrated firmware), `docs/BRINGUP_TONE.md`, `docs/BRINGUP_CONTROLS.md`, `docs/BRINGUP_SYNC.md` and `docs/BRINGUP_USBAUDIO.md`.

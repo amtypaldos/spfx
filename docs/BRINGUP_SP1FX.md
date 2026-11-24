@@ -1,4 +1,83 @@
-# SP-1 FX v1: integrated firmware bring-up (rc3 current)
+# SP-1 FX v1: integrated firmware bring-up (rc4 current)
+
+## rc4 (2026-11-24) -- NOT RUN ON HARDWARE
+
+| | |
+|---|---|
+| File | `~/spfx/flash-ready/sp1fx-v1-rc4.bin` (ELF: `sp1fx-v1-rc4.elf`) |
+| SHA-256 | `ae95d5caef17b36613dce3104ee03047a6ac381dcb0b4d5d79fd44511365ffbe` (in `SHA256SUMS`) |
+| Size | 151,504 B at 0x20000, `check_image.py` PASS (incl. `--reserve`), two clean builds identical |
+| Companion | use the companion from this commit (STATE has a new trailing byte, see PROTOCOL.md) |
+
+### 1. Stability under load (rc3 near-misses: control loop starved 2-4.9 s at ~99 % CPU)
+- The overload guard judges the **whole block time again** (engine + every interrupt and USB
+  thread that pre-empted it = total load), with rc3's two-window safety net and ~10 s recovery.
+  rc3 judged engine cycles only (81 %) while the total was 97-99 %.
+- **Starvation net:** if the control loop has not run for 0.5 s and the CPU has < 5 % idle, the
+  audio thread switches one effect off at once (`OVERLOAD`/blinking LED; it comes back after
+  calm).
+- **Saves never hold the control loop:** a record is programmed 32 bytes per 8 ms tick (about
+  13 ticks); no save starts while the total load is high (`load_defer=`).
+- **Diagnostics are off by default** (the 2 s block itself took > 1 s of the starved control
+  thread). In `screen`: press **`d`** to switch the periodic block on/off, **`i`** for one block
+  now. It prints one line per tick. Event lines (`B`, `C`, `K`, `SAVE`, `OVERLOAD`, `STALL`,
+  `CRASH`) stay on. The `D` line now names the effects (`fx=Sat,Bitc,Comp,Rev`, `(b)` =
+  bypassed); `thr%o` gives every thread's share (per mille) over the last 0.5 s.
+- About "control loop stopped for 4865 ms (watchdog at ~4000)": the 4000 ms is only what our
+  code requests; the nRF52 watchdog cannot be reconfigured once the TE bootloader has started
+  it, so the real timeout is the bootloader's (at least ~4.9 s, observed). Source finding.
+
+### 2. Saving is event-based (owner decision)
+Saved: at FN-hold power off (at once), ~1.5 s after a preset switch / leaving edit mode / an
+effect change (a burst of rocker presses is saved once), on the companion's SAVE_NOW and its
+setting changes (effect, order, BPM, sync, output mode, factory reset). **Fader moves, VOL,
+bypass taps** and the companion's wet/param/master/gain only go to RAM and are saved with the next
+event, at power off, or after 120 s with unsaved changes and low load. Nothing at boot.
+**Trade-off: those tweaks are lost if the battery dies or the unit resets before the next save.**
+Volume is saved at power off like the other tweaks. `store` line: `events= tweaks= load_defer=
+job_ms_max=`.
+
+### 3. Headphone jack: Headphones / Line out (companion: "Line out (headphone jack)")
+| Mode | CS42L42 mixer | digital trim | max into the codec | jack level at 0 dBFS, master 100 % (CALCULATED) |
+|---|---|---|---|---|
+| Headphones (default) | -30 dB | -6 dB | -6 dBFS | about 16 mVrms (-36 dB re ~1 Vrms) |
+| Line out | 0 dB | 0 dB | 0 dBFS | about 1.0 Vrms (+2 dBu, consumer line level) |
+Basis (source, not measured): mixer 0..-63 dB in 1 dB steps (Linux cs42l42 driver TLV); 0 dB is
+Tape Looper's shipping setting; Cirrus product page "2 x 35 mW into 30 ohm" = sqrt(0.035 x 30)
+= 1.02 Vrms at full scale. The datasheet's full-scale table could not be read here; the meaning
+of HP_CTL bit 1 ("full scale volume") is not used (left as before). Into a 10 kohm line input the
+level should be about the same (voltage output); not measured. The engine's limiter keeps the
+signal at or below full scale, so line out cannot drive the codec past 0 dBFS.
+- Switching to line out first **lowers the master by 36 dB** (so the level does not jump), then
+  fades out, changes the codec, fades in. Raise it with VOL+ (2 dB per press). Back to headphones
+  keeps the master (36 dB quieter).
+- Saved; restored at power-up (`CONFIG_SP1FX_LINEOUT_RESTORE=y`). First start, factory reset
+  and SAFE BOOT are always headphones. The speaker is never affected.
+- **Owner measurement (do this before using line out live):** headphones OFF; connect the
+  powered speaker (or a meter / audio interface input) to the headphone jack with the speaker's
+  volume low. Companion: switch to Line out (confirm the warning). Play a sine or music at full
+  scale from the Mac; press VOL+ step by step from where it starts and note the master dB
+  (`C ... VOLUME ... = N dB` line) at which the speaker is loud enough, and whether anything
+  distorts at master 0 dB. If you have a meter: report the Vrms at master 0 dB with a 0 dBFS
+  1 kHz sine (expected ~1 Vrms, calculated).
+
+### 4. Preset switch LEDs (owner request)
+The four PLAY-side LEDs flash rapidly together (7 flashes at 10 Hz, 0.7 s), then the position
+bar for 1.4 s. The refused pattern (alternating pairs) is unchanged and different.
+
+### rc4 test (in this order)
+1. As rc3 steps 1-5 (power on/off, controls, charging).
+2. Heavy preset or saved state, music on, companion connected: no STALL lines; if the CPU is
+   too high you should see an OVERLOAD line and a blinking slot LED instead of a stall.
+   Press `d` (companion closed) and report `D` + `thr%o` lines per preset.
+3. Presets: FN + FWD several times quickly: rapid flashing, bar; one `SAVE (event)` ~1.5 s
+   after the last press.
+4. Move faders, wait 10 s: no SAVE line. Power off (FN 4 s) and on: the fader state is back.
+5. Line out: the measurement above.
+
+---
+
+# rc3 (superseded by rc4)
 
 ## rc3 (2026-11-24) -- NOT RUN ON HARDWARE
 
