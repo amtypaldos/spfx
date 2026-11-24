@@ -83,8 +83,8 @@
 #define HP_POLL_MS       250
 #define DETAIL_EVERY     5        /* detail lines every 5th diag period */
 #define ADC_TIMEOUT_MS   100      /* a SAADC scan normally takes < 1 ms */
-#define SAVE_GAP_MS      30000u   /* rc2: at most one settings save per 30 s, none in the
-				   * first 30 s after boot (power off / SAVE_NOW excepted) */
+#define STARVE_SHED_MS   500u     /* rc4: control loop stalled this long with < 5 % idle CPU
+				   * -> the audio thread sheds an effect (engine_overload_shed_now) */
 
 /* ---------------------------- audio constants ---------------------------- */
 #define FS_HZ            48000
@@ -139,8 +139,9 @@ BUILD_ASSERT(DT_REG_ADDR(DT_NODELABEL(slot0_partition)) == 0x20000 &&
 BUILD_ASSERT(DT_REG_ADDR(DT_NODELABEL(storage_partition)) == 0xFF000,
 	     "the board storage page must stay at 0xFF000 (never touched)");
 BUILD_ASSERT(CFG_SIZE == 2u * STORE_PAGE_BYTES, "two journal pages");
-#define FLASH_CHUNK      8u      /* bytes per flash_write: 2 words, <= ~82 us of NVMC stall */
-#define FLASH_GAP_US     400     /* sleep between chunks: audio + USB run in between */
+#define FLASH_CHUNK      16u     /* bytes per flash_write: 4 words, <= ~164 us of NVMC stall */
+#define FLASH_GAP_US     300     /* sleep between chunks on the synchronous save paths */
+#define SAVE_STEP_BYTES  32u     /* rc4: bytes programmed per control tick (2 chunks) */
 
 K_MEM_SLAB_DEFINE_STATIC(tx_slab, BLK_BYTES, SLAB_BLOCKS, 4);
 K_MEM_SLAB_DEFINE_STATIC(usb_rx_slab, ROUND_UP(USB_PKT_BYTES, UDC_BUF_GRANULARITY), 4,
@@ -383,13 +384,15 @@ static void audio_thread(void *a, void *b, void *c)
 		render_block(blk, &ec, &ipk, &opk);
 
 		bc = DWT->CYCCNT - tb;
-		/* rc3: the guard judges the ENGINE's cycles (what shedding can reduce); rc2 judged
-		 * the whole block, which includes USB/ISR pre-emption (~25 % on the device) and shed
-		 * effects on USB/flash bursts. Blocks during a flash write (CPU stalls) are skipped. */
+		/* rc4: the guard judges the WHOLE block (engine + conversions + every interrupt and
+		 * USB thread that pre-empted it = total load). rc3 judged engine cycles only and
+		 * let the CPU reach ~99 % (block 97 %, engine 81 %) with the control thread
+		 * starved. rc2's false sheds on single 114 % windows are prevented by the two-window
+		 * safety net and recovery. Blocks during a flash write are skipped. */
 		if (g_flash_busy) {
 			engine_overload_skip(&eng);
 		} else {
-			(void)engine_overload_feed(&eng, ec, OVERLOAD_LIMIT_CYC);
+			(void)engine_overload_feed(&eng, bc, OVERLOAD_LIMIT_CYC);
 		}
 		quiet_feed(&g_quiet, ipk, opk);
 		g_frames += BLK_FRAMES;
@@ -730,6 +733,8 @@ static void proto_tx(void *c, const uint8_t *bytes, size_t n)
 	}
 }
 
+static bool g_diag_on, g_diag_req, g_diag_note;   /* console commands (see rx_drain) */
+
 static void rx_drain(void)
 {
 	uint8_t b[64];
@@ -744,6 +749,19 @@ static void rx_drain(void)
 			break;
 		}
 		total += n;
+		/* text-mode console commands (a terminal, not the companion): d = periodic
+		 * diagnostics on/off, i = one info block now. The bytes still go to the
+		 * protocol parser (a stray letter is just an invalid frame). */
+		if (conmode_text_ok(&conm)) {
+			for (uint32_t i = 0; i < n; i++) {
+				if (b[i] == 'd' || b[i] == 'D') {
+					g_diag_on = !g_diag_on;
+					g_diag_note = true;
+				} else if (b[i] == 'i' || b[i] == 'I') {
+					g_diag_req = true;
+				}
+			}
+		}
 		proto_rx(&proto, b, n);
 	}
 }
@@ -814,6 +832,7 @@ static bool cs42_ok, tas_ok, cs42_cfg_ok, tas_cfg_ok;
 enum out { OUT_NONE, OUT_SPK, OUT_HP };
 static const char *const out_name[] = { "none", "spk", "hp" };
 static enum out cur_out = OUT_NONE;
+static uint8_t g_out_mode = OUT_MODE_HP;   /* rc4: headphone jack: headphones / line out */
 static int hp_in = -1;
 static int hp_raw = -1;
 
@@ -828,8 +847,20 @@ static enum out wanted_out(void)
 	return OUT_NONE;
 }
 
+/* digital trim + CS42L42 mixer for the output in use and the jack mode (controls/volume.h) */
+static void apply_levels(enum out o)
+{
+	const out_levels_t lv = vol_out_levels(g_out_mode, o == OUT_HP);
+
+	trim_gain = powf(10.0f, (float)lv.trim_db / 20.0f);   /* audio thread reads one float */
+	if (cs42_cfg_ok) {
+		(void)cs42_hp_set_att((uint8_t)lv.mix_att_db, false);
+	}
+}
+
 static void apply_out(enum out o)
 {
+	apply_levels(o);
 	if (cur_out == OUT_SPK || o != OUT_SPK) {
 		if (tas_cfg_ok) {
 			(void)tas_spk_enable(false);
@@ -849,6 +880,26 @@ static void apply_out(enum out o)
 	g_out_enable = (o != OUT_NONE);
 }
 
+/* Headphones <-> line out: fade out, change mixer + trim, fade back in (as an output switch).
+ * Going to line out first lowers the master so the level at the jack does not jump up. */
+static void set_out_mode(uint8_t mode)
+{
+	mode = mode == OUT_MODE_LINE ? OUT_MODE_LINE : OUT_MODE_HP;
+	if (mode == g_out_mode) {
+		return;
+	}
+	const float m = vol_master_for_mode_switch(eng.cfg.master, g_out_mode, mode);
+
+	if (m != eng.cfg.master) {
+		engine_set_master(&eng, m);
+	}
+	g_out_enable = false;
+	wait_silent();
+	g_out_mode = mode;
+	proto.out_mode = mode;
+	apply_out(cur_out);
+}
+
 static void dwt_enable(void)
 {
 	CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
@@ -858,8 +909,10 @@ static void dwt_enable(void)
 
 /* ------------------------------ settings --------------------------------- */
 static store_t store;
-static store_debounce_t deb;
+static saveev_t sev;              /* rc4: event-based saving (app_logic.h) */
 static save_sched_t ssched;
+static store_job_t sjob;          /* rc4: a record written a few bytes per control tick */
+static uint32_t sjob_t0;
 static bool store_ok;
 static uint32_t st_saves, st_erases, st_errors, st_erase_ms_max, st_write_ms_max;
 static int st_load_rc = -2;
@@ -889,8 +942,10 @@ static int fl_read(void *uctx, uint32_t page, uint32_t off, void *buf, uint32_t 
 	return flash_read(flash_dev, (off_t)a, buf, len);
 }
 
-/* Chunked: each flash_write stalls the CPU for <= 2 x 41 us (nRF52840 tWRITE max per word);
- * the sleep between chunks lets the audio thread, I2S and USB interrupts run. */
+/* Each flash_write programs FLASH_CHUNK bytes (CPU stall <= 4 x 41 us, nRF52840 tWRITE max per
+ * word). rc4: the control loop programs a record SAVE_STEP_BYTES per tick (store_job_step), so a
+ * save never holds the control loop; only the synchronous paths (power off, SAVE_NOW) pass more
+ * at once and get short sleeps between chunks so audio and USB keep running. */
 static int fl_write(void *uctx, uint32_t page, uint32_t off, const void *buf, uint32_t len)
 {
 	ARG_UNUSED(uctx);
@@ -905,27 +960,27 @@ static int fl_write(void *uctx, uint32_t page, uint32_t off, const void *buf, ui
 
 	stage(ST_FLASH_W);
 	g_flash_ops++;
-	g_flash_busy = 1;
-
 	for (uint32_t i = 0; i < len; i += FLASH_CHUNK) {
 		const uint32_t n = MIN(FLASH_CHUNK, len - i);
+
+		g_flash_busy = 1;
 		int rc = flash_write(flash_dev, (off_t)(a + i), p + i, n);
 
+		g_flash_busy = 0;
 		if (rc != 0) {
 			g_flash_end_ms = k_uptime_get_32();
-			g_flash_busy = 0;
 			stage(prev);
 			return rc;
 		}
 		feed_wdt();
-		k_usleep(FLASH_GAP_US);
+		if (len > SAVE_STEP_BYTES && i + n < len) {
+			k_usleep(FLASH_GAP_US);
+		}
 	}
 	const uint32_t ms = (uint32_t)(k_uptime_get() - t0);
 
 	g_flash_end_ms = k_uptime_get_32();
-	g_flash_busy = 0;
 	stage(prev);
-
 	st_write_ms_max = MAX(st_write_ms_max, ms);
 	return 0;
 }
@@ -980,7 +1035,7 @@ static bool usb_vbus(void)
 }
 static uint32_t st_busy;   /* SAVE_NOW answered "busy" */
 static uint32_t st_dedup;  /* due saves skipped: nothing differs from the last saved record */
-static uint32_t st_last_save_ms;          /* boot time, then the last write */
+static uint32_t st_job_ms_max, st_events, st_tweaks;
 static uint8_t st_last_rec[STORE_RECORD_BYTES];
 static uint16_t st_last_len;
 static bool safe_boot;                    /* crash-loop breaker: journal not used this run */
@@ -990,24 +1045,36 @@ static void cur_data(store_data_t *d)
 	d->cfg = eng.cfg;
 	d->bpm = proto.bpm;
 	d->sync_on = proto.sync_on;
+	d->out_mode = g_out_mode;
 }
 
+/* encode + compare with the last record on flash; 1 = identical (nothing to write) */
+static int save_same(store_data_t *d, uint8_t *enc, uint16_t *n)
+{
+	cur_data(d);
+	*n = store_encode(d, enc, STORE_RECORD_BYTES - 1u);
+	if (*n == 0u) {
+		return 0;
+	}
+	enc[(*n)++] = d->out_mode;   /* the journal extension counts too */
+	return *n == st_last_len && memcmp(enc, st_last_rec, *n) == 0;
+}
+
+/* Synchronous save (power off, SAVE_NOW, and the rare save that needs a page erase). An active
+ * stepped job is abandoned (its torn slot is skipped by the journal). */
 static int do_save(const char *why)
 {
 	static store_data_t d;   /* control thread only; keeps 1 KB off the stack */
+	static uint8_t enc[STORE_RECORD_BYTES];
+	uint16_t n = 0;
 
-	if (!store_ok) {
-		return -1;
-	}
-	if (safe_boot) {
+	if (!store_ok || safe_boot) {
 		return -1;   /* never overwrite the journal from a crash-loop safe boot */
 	}
-	cur_data(&d);
-	static uint8_t enc[STORE_RECORD_BYTES];
-	const uint16_t n = store_encode(&d, enc, sizeof(enc));
-
-	if (n != 0u && n == st_last_len && memcmp(enc, st_last_rec, n) == 0) {
-		st_dedup++;   /* identical to what is on flash: no write */
+	sjob.active = 0;
+	if (save_same(&d, enc, &n)) {
+		st_dedup++;
+		saveev_saved(&sev, k_uptime_get_32());
 		return 0;
 	}
 	const int64_t t0 = k_uptime_get();
@@ -1017,10 +1084,10 @@ static int do_save(const char *why)
 		st_saves++;
 		memcpy(st_last_rec, enc, n);
 		st_last_len = n;
+		saveev_saved(&sev, k_uptime_get_32());
 	} else {
 		st_errors++;
 	}
-	st_last_save_ms = k_uptime_get_32();
 	EV_PRINTF("SAVE (%s) rc=%d seq=%u page=%d slot=%d took %u ms\r\n", why, rc,
 		  (unsigned int)store.seq, store.active_page, store.next_slot - 1,
 		  (unsigned int)(k_uptime_get() - t0));
@@ -1032,17 +1099,40 @@ static int proto_save_now(void *uctx)
 	ARG_UNUSED(uctx);
 	if (store_ok && usb_vbus() && store_save_needs_erase(&store)) {
 		/* would erase with USB running: keep it pending (power off saves it) */
-		ssched.pending = 1;
+		saveev_event(&sev, k_uptime_get_32());
 		st_busy++;
 		return PR_BUSY;
 	}
-	int rc = do_save("SAVE_NOW");
+	return do_save("SAVE_NOW");
+}
 
-	if (rc == 0) {
-		deb.dirty = 0;
-		ssched.pending = 0;
+/* Companion changes: settings that matter are save events, continuous controls are tweaks. */
+static void proto_host_change(void *uctx, uint8_t type)
+{
+	ARG_UNUSED(uctx);
+	const uint32_t now = k_uptime_get_32();
+
+	switch (type) {
+	case PT_SET_PARAM: case PT_SET_WET: case PT_SET_MASTER: case PT_SET_INPUT_GAIN:
+	case PT_SET_BYPASS:
+		saveev_tweak(&sev, now);
+		st_tweaks++;
+		break;
+	default:
+		saveev_event(&sev, now);
+		st_events++;
+		break;
 	}
-	return rc;
+}
+
+/* Total-load check for saves: the last guard window (whole-block time, i.e. engine + every
+ * interrupt / USB thread that pre-empted it) under the limit and some idle CPU left. */
+static uint32_t g_idle_permille = 1000u;
+
+static bool load_ok(void)
+{
+	return eng.diag.ovl_last_mean <= OVERLOAD_LIMIT_CYC && g_idle_permille >= 50u &&
+	       eng.diag.shed_mask == 0u && !eng.diag.forced_bypass;
 }
 
 static void storage_tick(uint32_t now)
@@ -1050,25 +1140,55 @@ static void storage_tick(uint32_t now)
 	if (!store_ok || safe_boot) {
 		return;
 	}
-	/* rc2: nothing in the first 30 s after boot and at most one save per 30 s (the debounce
-	 * keeps the change marked dirty meanwhile) */
-	const int due = (now - st_last_save_ms >= SAVE_GAP_MS) ? store_debounce_due(&deb, now) : 0;
+	/* a stepped save in progress: SAVE_STEP_BYTES per tick, never more */
+	if (sjob.active) {
+		const int r = store_job_step(&store, &sjob, SAVE_STEP_BYTES);
+
+		if (r == 1) {
+			const uint32_t ms = now - sjob_t0;
+
+			st_saves++;
+			saveev_saved(&sev, now);
+			st_job_ms_max = MAX(st_job_ms_max, ms);
+			EV_PRINTF("SAVE (event) seq=%u page=%d slot=%d took %u ms in steps\r\n",
+				  (unsigned int)store.seq, store.active_page, store.next_slot - 1,
+				  (unsigned int)ms);
+		} else if (r < 0) {
+			st_errors++;
+		}
+		return;
+	}
+	const int due = saveev_due(&sev, now, load_ok() ? 1 : 0);
 	/* "quiet" for the scheduler = an erase is allowed: silent audio AND no USB cable (rc2) */
 	const int quiet = quiet_ok(&g_quiet, QUIET_BLOCKS) && engine_config_settled(&eng) &&
 			  !usb_vbus();
-
-	/* store_*_needs_erase read flash (cheap reads, cached for the spare page) */
 	const save_action_t act = save_sched_next(&ssched, now, due,
 						  (due || ssched.pending) ? store_save_needs_erase(&store) : 0,
 						  quiet ? store_spare_needs_erase(&store) : 0, quiet);
 
 	switch (act) {
-	case SAVE_WRITE:
-		(void)do_save("debounced");
+	case SAVE_WRITE: {
+		static store_data_t d;
+		static uint8_t enc[STORE_RECORD_BYTES];
+		uint16_t n = 0;
+
+		if (save_same(&d, enc, &n)) {
+			st_dedup++;
+			saveev_saved(&sev, now);
+			break;
+		}
+		if (store_job_begin(&store, &d, &sjob) == 0) {   /* no erase: checked above */
+			memcpy(st_last_rec, enc, n);
+			st_last_len = n;
+			sjob_t0 = now;
+		} else {
+			st_errors++;
+		}
 		break;
+	}
 	case SAVE_WRITE_WITH_ERASE:
 		save_sched_erased(&ssched, now);
-		(void)do_save("debounced, page erase while quiet");
+		(void)do_save("event, page erase while quiet");
 		break;
 	case SAVE_ERASE_SPARE: {
 		save_sched_erased(&ssched, now);
@@ -1427,6 +1547,11 @@ static void sup_sample(void)
 		sup_tot_cur = st.execution_cycles;
 		sup_idle_cur = st.idle_cycles;
 	}
+	{
+		const uint64_t dt = sup_tot_cur - sup_tot_prev;
+
+		g_idle_permille = dt ? (uint32_t)((sup_idle_cur - sup_idle_prev) * 1000u / dt) : 1000u;
+	}
 	sup_sof_prev = sup_sof_cur;
 	sup_sof_cur = g_sof_count;
 	sup_blk_prev = sup_blk_cur;
@@ -1527,6 +1652,17 @@ static void sup_audio_tick(void)
 	if (age > g_stall_max_ms) {
 		g_stall_max_ms = age;
 	}
+	/* rc4 starvation net: the control loop has not run for 0.5 s and the CPU has no idle
+	 * time left -> shed an effect now (at most every 0.5 s); the guard recovers it later */
+	{
+		static uint32_t last_shed;
+
+		if (age >= STARVE_SHED_MS && g_idle_permille < 50u && g_stage != ST_POWEROFF &&
+		    now - last_shed >= STARVE_SHED_MS) {
+			last_shed = now;
+			(void)engine_overload_shed_now(&eng);
+		}
+	}
 	if (age >= STALL1_MS && sup_snaps == 0u) {
 		sup_snapshot(0, now, age);
 		sup_snaps = 1;
@@ -1557,7 +1693,7 @@ static FUNC_NORETURN void power_off(void)
 	}
 	controls_hw_leds_off();
 	/* save unsaved settings first (audio is going away, an erase is fine now) */
-	if (store_ok && (deb.dirty || ssched.pending)) {
+	if (store_ok && (sev.dirty || sjob.active || ssched.pending)) {
 		(void)do_save("power off");
 	}
 	con_printf("POWER OFF: release FUNCTION; next FUNCTION press wakes into the bootloader\r\n");
@@ -1688,153 +1824,169 @@ static void log_changes(struct shadow *sh, uint32_t now)
 	}
 }
 
-struct usage {
-	uint64_t audio, main, sync, total, idle;
-};
-
-static void usage_get(struct usage *u)
-{
-	k_thread_runtime_stats_t st;
-
-	memset(u, 0, sizeof(*u));
-	if (k_thread_runtime_stats_get(&audio_tcb, &st) == 0) {
-		u->audio = st.execution_cycles;
-	}
-	if (k_thread_runtime_stats_get(k_current_get(), &st) == 0) {
-		u->main = st.execution_cycles;
-	}
-#if CONFIG_SP1FX_SYNC
-	if (k_thread_runtime_stats_get(&sync_tcb, &st) == 0) {
-		u->sync = st.execution_cycles;
-	}
-#endif
-	if (k_thread_runtime_stats_all_get(&st) == 0) {
-		u->total = st.execution_cycles;
-		u->idle = st.idle_cycles;
-	}
-}
-
-static unsigned int share10(uint64_t part, uint64_t whole)
-{
-	return whole ? (unsigned int)((part * 1000u + whole / 2u) / whole) : 0u;
-}
 
 static uint32_t ovl_period_max;   /* highest guard-window mean since the last D line */
 
-static void log_diag(uint32_t now, bool detail)
+/* rc4: diagnostics are OFF by default (the 2 s block cost the starved control thread >1 s on
+ * the owner's unit). On the text console: 'd' toggles the periodic block, 'i' prints one block
+ * with the detail lines now. Event lines (B/C/K/SAVE/OVERLOAD/STALL/CRASH) stay on. The block is
+ * printed ONE LINE PER CONTROL TICK, so no tick formats more than one line. */
+static int g_diag_line = -1;    /* next line of the block being printed, -1 none */
+static bool g_diag_detail;
+
+static void diag_start(bool detail)
+{
+	if (g_diag_line < 0) {
+		g_diag_line = 0;
+		g_diag_detail = detail;
+	}
+}
+
+static const char *fxs(int s)
+{
+	static const char *const n[] = { "-", "Filt", "Chor", "Dly", "Rev", "Sat", "Flng", "Bitc",
+					 "Trem", "Comp", "Tape" };
+	const int id = eng.cfg.fx_id[s];
+
+	return (id >= 0 && id < (int)ARRAY_SIZE(n)) ? n[id] : "?";
+}
+
+static void log_diag_step(uint32_t now)
 {
 	static uint32_t prev_frames_in, prev_sof, prev_blocks;
-	static struct usage pu;
-	struct a_snap a = { 0 };
-	const bool a_ok = snap_read(&a_seq, &a_pub, &a, sizeof(a));
-	const uint32_t fin = g_usb_frames_in, sof = g_sof_count, b = g_blocks;
-	saadc_scan_stats_t dsst;
+	static struct a_snap a;
+	static bool a_ok;
 
-	saadc_scan_stats(&dsst, now);
-
-	con_printf("D t=%u preset=%d:%s cpu%%_avg/max=%u.%u/%u.%u blk%%_avg/max=%u.%u/%u.%u%s "
-		   "ovh_max=%u spikes>85%%=%u ovl win=%u.%u%% win_max_period=%u.%u%% max=%u.%u%% "
-		   "shed=0x%x forced=%u "
-		   "vol=%d dB\r\n"
-		   "  ctl ticks=%u scans=%u scan_age_ms=%u lad_raw=%d,%d fad_raw=%d,%d,%d,%d btn=0x%03x "
-		   "deb=0x%03x fn: gpio=%d armed=%d down=%d consumed=%d long=%d mode=%s%d held_slot=%d\r\n",
-		   now / 1000u, ui.preset_idx + 1, preset_name(ui.preset_idx),
-		   pct10(a.cyc_avg) / 10, pct10(a.cyc_avg) % 10, pct10(a.cyc_max) / 10,
-		   pct10(a.cyc_max) % 10, pct10(a.blk_avg) / 10, pct10(a.blk_avg) % 10,
-		   pct10(a.blk_max) / 10, pct10(a.blk_max) % 10, a_ok ? "" : "?",
-		   (unsigned int)a.ovh_max, (unsigned int)a.spikes,
-		   pct10(eng.diag.ovl_last_mean) / 10, pct10(eng.diag.ovl_last_mean) % 10,
-		   pct10(ovl_period_max) / 10, pct10(ovl_period_max) % 10,
-		   pct10(eng.diag.ovl_max_mean) / 10, pct10(eng.diag.ovl_max_mean) % 10,
-		   eng.diag.shed_mask, eng.diag.forced_bypass, idb(vol_master_db(eng.cfg.master)),
-		   (unsigned int)g_ctl_ticks, (unsigned int)g_ctl_scans, (unsigned int)dsst.age_ms,
-		   g_lad_raw[0], g_lad_raw[1], (int)fad[0].held, (int)fad[1].held, (int)fad[2].held,
-		   (int)fad[3].held, g_btn_mask, ui.deb.stable, controls_hw_fn_pressed() ? 1 : 0,
-		   g_fn_armed ? 1 : 0, ui.gest.fn_down, ui.gest.fn_consumed, ui.gest.fn_long_sent,
-		   ui.mode == UI_EDIT ? "EDIT" : "PERF", ui.mode == UI_EDIT ? ui.edit_slot + 1 : 0,
-		   ui.held_slot);
-	con_printf("  usb out=%s play=%d fill_min/avg/max=%u/%u/%u rx_f/s=%u sof/s=%u under=%u "
-		   "ovr=%u dup=%u drop=%u | in_pk=%u out_pk=%u (x1e-3) in_clip=%u out_clip=%u "
-		   "sat16=%u | i2s blk/s=%u err=%u rec=%u | out=%s hp=%d quiet=%u\r\n",
-		   g_out_stream ? "on" : "off", g_playing ? 1 : 0, (unsigned int)a.fill_min,
-		   (unsigned int)a.fill_avg, (unsigned int)a.fill_max,
-		   (unsigned int)((fin - prev_frames_in) * 1000u / CONFIG_SP1FX_DIAG_PERIOD_MS),
-		   (unsigned int)((sof - prev_sof) * 1000u / CONFIG_SP1FX_DIAG_PERIOD_MS),
-		   (unsigned int)out_cons.underruns, (unsigned int)g_usb_overrun,
-		   (unsigned int)out_cons.dups, (unsigned int)out_cons.drops,
-		   milli(a.in_pk), milli(a.out_pk), (unsigned int)eng.diag.in_clips,
-		   (unsigned int)eng.diag.out_clips, (unsigned int)g_out_sat,
-		   (unsigned int)((b - prev_blocks) * 1000u / CONFIG_SP1FX_DIAG_PERIOD_MS),
-		   (unsigned int)g_err, (unsigned int)g_recover, out_name[cur_out], hp_raw,
-		   quiet_ok(&g_quiet, QUIET_BLOCKS) ? 1u : 0u);
-	ovl_period_max = 0;
-	prev_frames_in = fin;
-	prev_sof = sof;
-	prev_blocks = b;
-
-	struct usage u;
-
-	usage_get(&u);
-	const uint64_t dt = u.total - pu.total;
-
-	con_printf("  threads%% audio=%u.%u main=%u.%u sync=%u.%u other=%u.%u idle=%u.%u "
-		   "(ISR time counts to the thread it interrupted)\r\n",
-		   share10(u.audio - pu.audio, dt) / 10, share10(u.audio - pu.audio, dt) % 10,
-		   share10(u.main - pu.main, dt) / 10, share10(u.main - pu.main, dt) % 10,
-		   share10(u.sync - pu.sync, dt) / 10, share10(u.sync - pu.sync, dt) % 10,
-		   share10(dt - (u.audio - pu.audio) - (u.main - pu.main) - (u.sync - pu.sync) -
-			   (u.idle - pu.idle), dt) / 10,
-		   share10(dt - (u.audio - pu.audio) - (u.main - pu.main) - (u.sync - pu.sync) -
-			   (u.idle - pu.idle), dt) % 10,
-		   share10(u.idle - pu.idle, dt) / 10, share10(u.idle - pu.idle, dt) % 10);
-	pu = u;
-	if (!detail) {
+	if (g_diag_line < 0 || !conmode_text_ok(&conm)) {
+		g_diag_line = -1;
 		return;
 	}
+	switch (g_diag_line++) {
+	case 0:
+		a_ok = snap_read(&a_seq, &a_pub, &a, sizeof(a));
+		con_printf("D t=%u preset=%d:%s fx=%s%s,%s%s,%s%s,%s%s cpu%%=%u.%u/%u.%u blk%%=%u.%u/%u.%u%s "
+			   "spk>85=%u win=%u.%u win_max=%u.%u shed=0x%x f=%u vol=%d out=%s\r\n",
+			   now / 1000u, ui.preset_idx + 1, preset_name(ui.preset_idx),
+			   fxs(0), eng.cfg.bypass[0] ? "(b)" : "", fxs(1), eng.cfg.bypass[1] ? "(b)" : "",
+			   fxs(2), eng.cfg.bypass[2] ? "(b)" : "", fxs(3), eng.cfg.bypass[3] ? "(b)" : "",
+			   pct10(a.cyc_avg) / 10, pct10(a.cyc_avg) % 10, pct10(a.cyc_max) / 10,
+			   pct10(a.cyc_max) % 10, pct10(a.blk_avg) / 10, pct10(a.blk_avg) % 10,
+			   pct10(a.blk_max) / 10, pct10(a.blk_max) % 10, a_ok ? "" : "?",
+			   (unsigned int)a.spikes,
+			   pct10(eng.diag.ovl_last_mean) / 10, pct10(eng.diag.ovl_last_mean) % 10,
+			   pct10(ovl_period_max) / 10, pct10(ovl_period_max) % 10,
+			   eng.diag.shed_mask, eng.diag.forced_bypass, idb(vol_master_db(eng.cfg.master)),
+			   g_out_mode == OUT_MODE_LINE ? "LINE" : "hp");
+		ovl_period_max = 0;
+		break;
+	case 1: {
+		/* CPU share per thread over the last 0.5 s (stall-watcher sample) */
+		char buf[200];
+		int len = snprintk(buf, sizeof(buf), "  thr%%o");
+		const uint64_t dt = sup_tot_cur - sup_tot_prev;
+
+		for (int i = 0; i < sup_n && len > 0 && len < (int)sizeof(buf) - 24; i++) {
+			const char *nm = sup_thr[i].name ? sup_thr[i].name : "?";
+
+			len += snprintk(buf + len, sizeof(buf) - (size_t)len, " %.6s=%u", nm,
+					dt ? (unsigned int)((sup_thr[i].cur - sup_thr[i].prev) * 1000u / dt) : 0u);
+		}
+		if (len > 0 && len < (int)sizeof(buf) - 20) {
+			len += snprintk(buf + len, sizeof(buf) - (size_t)len, " idle=%u\r\n",
+					(unsigned int)g_idle_permille);
+		}
+		con_write(buf, len);
+		break;
+	}
+	case 2: {
+		const uint32_t fin = g_usb_frames_in, sof = g_sof_count, b = g_blocks;
+
+		con_printf("  usb fill=%u/%u/%u rx_f/s=%u sof/s=%u under=%u ovr=%u | in_pk=%u out_pk=%u "
+			   "clip=%u/%u | i2s/s=%u err=%u | ctl %u/%u age=%u | %s hp=%d quiet=%u\r\n",
+			   (unsigned int)a.fill_min, (unsigned int)a.fill_avg, (unsigned int)a.fill_max,
+			   (unsigned int)((fin - prev_frames_in) * 1000u / CONFIG_SP1FX_DIAG_PERIOD_MS),
+			   (unsigned int)((sof - prev_sof) * 1000u / CONFIG_SP1FX_DIAG_PERIOD_MS),
+			   (unsigned int)out_cons.underruns, (unsigned int)g_usb_overrun,
+			   milli(a.in_pk), milli(a.out_pk), (unsigned int)eng.diag.in_clips,
+			   (unsigned int)eng.diag.out_clips,
+			   (unsigned int)((b - prev_blocks) * 1000u / CONFIG_SP1FX_DIAG_PERIOD_MS),
+			   (unsigned int)g_err, (unsigned int)g_ctl_ticks, (unsigned int)g_ctl_scans,
+			   (unsigned int)(now - g_loop_ms), out_name[cur_out], hp_raw,
+			   quiet_ok(&g_quiet, QUIET_BLOCKS) ? 1u : 0u);
+		prev_frames_in = fin;
+		prev_sof = sof;
+		prev_blocks = b;
+		break;
+	}
+	case 3:
+		con_printf("  ctl lad=%d,%d fad=%d,%d,%d,%d btn=0x%03x deb=0x%03x fn=%d%d%d%d%d mode=%s%d "
+			   "held=%d\r\n", g_lad_raw[0], g_lad_raw[1], (int)fad[0].held, (int)fad[1].held,
+			   (int)fad[2].held, (int)fad[3].held, g_btn_mask, ui.deb.stable,
+			   controls_hw_fn_pressed() ? 1 : 0, g_fn_armed ? 1 : 0, ui.gest.fn_down,
+			   ui.gest.fn_consumed, ui.gest.fn_long_sent, ui.mode == UI_EDIT ? "EDIT" : "PERF",
+			   ui.mode == UI_EDIT ? ui.edit_slot + 1 : 0, ui.held_slot);
+		if (!g_diag_detail) {
+			g_diag_line = -1;
+		}
+		break;
+	case 4: {
 	unsigned int a_sz = 0, m_sz = 0, s_sz = 0, s_used = 0;
-	const unsigned int a_used = stack_used(&audio_tcb, &a_sz);
-	const unsigned int m_used = stack_used(k_current_get(), &m_sz);
+		const unsigned int a_used = stack_used(&audio_tcb, &a_sz);
+		const unsigned int m_used = stack_used(k_current_get(), &m_sz);
 #if CONFIG_SP1FX_SYNC
-	s_used = stack_used(&sync_tcb, &s_sz);
+		s_used = stack_used(&sync_tcb, &s_sz);
 #endif
-	con_printf("  info fw=%s stk audio=%u/%u main=%u/%u sync=%u/%u apply_cyc_max=%u "
-		   "blk_cyc_max=%u starve=%u torn=%u lay_err=%u boots=%u rr=%x hw=%d adc=%d "
-		   "pwm_rel=0x%x cs42=%s tas=%s usb=%d trim=%d dB stalls=%u stall_max_ms=%u "
-		   "vbus=%d pgood=%d charging=%d boot=%s save_busy=%u cdc_tx=%u cdc_rx=%u txq_max=%u\r\n",
-		   FW_VERSION, a_used, a_sz, m_used, m_sz, s_used, s_sz,
-		   (unsigned int)g_apply_max, (unsigned int)g_blk_max_all, (unsigned int)g_starve,
-		   (unsigned int)eng.diag.torn_retries, (unsigned int)eng.diag.layout_errors,
-		   (unsigned int)crashdump_boots(), (unsigned int)sp1fx_boot_resetreas, hw_rc,
-		   controls_hw_adc_status(), (unsigned int)controls_hw_released_pwms(),
-		   cs42_cfg_ok ? "ok" : (cs42_ok ? "cfg-fail" : "absent"),
-		   tas_cfg_ok ? "ok" : (tas_ok ? "cfg-fail" : "absent"), usb_rc,
-		   CONFIG_SP1FX_OUT_TRIM_DB, (unsigned int)g_stall_count,
-		   (unsigned int)g_stall_max_ms, usb_vbus() ? 1 : 0,
-		   (NRF_P0->IN & (1u << BQ_NPGD)) == 0u ? 1 : 0, charging() ? 1 : 0,
-		   g_boot_mode == BOOT_STANDBY ? "standby+4s" : "now", (unsigned int)st_busy,
-		   (unsigned int)cdc_tx_bytes, (unsigned int)cdc_rx_bytes,
-		   (unsigned int)ctx.q.max_used);
+		con_printf("  info fw=%s stk audio=%u/%u main=%u/%u sync=%u/%u apply_cyc_max=%u "
+			   "blk_cyc_max=%u starve=%u torn=%u lay_err=%u boots=%u rr=%x hw=%d adc=%d "
+			   "pwm_rel=0x%x cs42=%s tas=%s usb=%d trim=%d dB stalls=%u stall_max_ms=%u "
+			   "vbus=%d pgood=%d charging=%d boot=%s save_busy=%u cdc_tx=%u cdc_rx=%u txq_max=%u\r\n",
+			   FW_VERSION, a_used, a_sz, m_used, m_sz, s_used, s_sz,
+			   (unsigned int)g_apply_max, (unsigned int)g_blk_max_all, (unsigned int)g_starve,
+			   (unsigned int)eng.diag.torn_retries, (unsigned int)eng.diag.layout_errors,
+			   (unsigned int)crashdump_boots(), (unsigned int)sp1fx_boot_resetreas, hw_rc,
+			   controls_hw_adc_status(), (unsigned int)controls_hw_released_pwms(),
+			   cs42_cfg_ok ? "ok" : (cs42_ok ? "cfg-fail" : "absent"),
+			   tas_cfg_ok ? "ok" : (tas_ok ? "cfg-fail" : "absent"), usb_rc,
+			   CONFIG_SP1FX_OUT_TRIM_DB, (unsigned int)g_stall_count,
+			   (unsigned int)g_stall_max_ms, usb_vbus() ? 1 : 0,
+			   (NRF_P0->IN & (1u << BQ_NPGD)) == 0u ? 1 : 0, charging() ? 1 : 0,
+			   g_boot_mode == BOOT_STANDBY ? "standby+4s" : "now", (unsigned int)st_busy,
+			   (unsigned int)cdc_tx_bytes, (unsigned int)cdc_rx_bytes,
+			   (unsigned int)ctx.q.max_used);
+		break;
+	}
+	case 5: {
 	saadc_scan_stats_t sst;
 
-	saadc_scan_stats(&sst, now);
-	con_printf("  store ok=%d load=%d seq=%u page=%d saves=%u erases=%u errors=%u "
-		   "write_ms_max=%u erase_ms_max=%u deferred=%u dirty=%d pending=%d dedup=%u safe=%d | "
-		   "ctl ticks=%u scans=%u scan_age_ms=%u adc_to=%u start_fail=%u stop_fail=%u "
-		   "ppi_cleared=%u saadc_was_on=%u batt_raw=%d | "
-		   "sync on=%u hw=%u ticks=%u pulses=%u starts=%u | con drops=%u frames_drop=%u "
-		   "rx_drop=%u ev_drop=%u rx_frames=%u bad=%u\r\n",
-		   store_ok ? 1 : 0, st_load_rc, (unsigned int)store.seq, store.active_page,
-		   (unsigned int)st_saves, (unsigned int)st_erases, (unsigned int)st_errors,
-		   (unsigned int)st_write_ms_max, (unsigned int)st_erase_ms_max,
-		   (unsigned int)ssched.deferred, deb.dirty, ssched.pending, (unsigned int)st_dedup,
-		   safe_boot ? 1 : 0, (unsigned int)g_ctl_ticks, (unsigned int)g_ctl_scans,
-		   (unsigned int)sst.age_ms, (unsigned int)sst.timeouts, (unsigned int)sst.start_fail,
-		   (unsigned int)sst.stop_fail, (unsigned int)sst.ppi_cleared,
-		   (unsigned int)sst.was_enabled, (int)g_batt_raw, proto.sync_on,
-		   g_sync_hw_init, (unsigned int)g_sync_ticks, (unsigned int)g_sync_pulses,
-		   (unsigned int)g_sync_starts, (unsigned int)ctx.text_drops,
-		   (unsigned int)ctx.frame_drops, (unsigned int)rx_drops, (unsigned int)ev_rl.dropped,
-		   (unsigned int)proto.rx_frames, (unsigned int)proto.rx_dropped);
+		saadc_scan_stats(&sst, now);
+		con_printf("  store ok=%d load=%d seq=%u page=%d saves=%u erases=%u errors=%u "
+			   "write_ms_max=%u erase_ms_max=%u deferred=%u dirty=%d pending=%d dedup=%u safe=%d "
+			   "events=%u tweaks=%u load_defer=%u job_ms_max=%u out=%s | "
+			   "ctl ticks=%u scans=%u scan_age_ms=%u adc_to=%u start_fail=%u stop_fail=%u "
+			   "ppi_cleared=%u saadc_was_on=%u batt_raw=%d | "
+			   "sync on=%u hw=%u ticks=%u pulses=%u starts=%u | con drops=%u frames_drop=%u "
+			   "rx_drop=%u ev_drop=%u rx_frames=%u bad=%u\r\n",
+			   store_ok ? 1 : 0, st_load_rc, (unsigned int)store.seq, store.active_page,
+			   (unsigned int)st_saves, (unsigned int)st_erases, (unsigned int)st_errors,
+			   (unsigned int)st_write_ms_max, (unsigned int)st_erase_ms_max,
+			   (unsigned int)ssched.deferred, sev.dirty, ssched.pending, (unsigned int)st_dedup,
+			   safe_boot ? 1 : 0, (unsigned int)st_events, (unsigned int)st_tweaks,
+			   (unsigned int)sev.deferred_load, (unsigned int)st_job_ms_max,
+			   g_out_mode == OUT_MODE_LINE ? "LINE" : "hp", (unsigned int)g_ctl_ticks, (unsigned int)g_ctl_scans,
+			   (unsigned int)sst.age_ms, (unsigned int)sst.timeouts, (unsigned int)sst.start_fail,
+			   (unsigned int)sst.stop_fail, (unsigned int)sst.ppi_cleared,
+			   (unsigned int)sst.was_enabled, (int)g_batt_raw, proto.sync_on,
+			   g_sync_hw_init, (unsigned int)g_sync_ticks, (unsigned int)g_sync_pulses,
+			   (unsigned int)g_sync_starts, (unsigned int)ctx.text_drops,
+			   (unsigned int)ctx.frame_drops, (unsigned int)rx_drops, (unsigned int)ev_rl.dropped,
+			   (unsigned int)proto.rx_frames, (unsigned int)proto.rx_dropped);
+		g_diag_line = -1;
+		break;
+	}
+	default:
+		g_diag_line = -1;
+		break;
+	}
 }
 
 /* --------------------------------- main ---------------------------------- */
@@ -1904,13 +2056,15 @@ int main(void)
 	} else {
 		store_data_default(&boot_d);   /* safe boot: factory defaults, journal untouched */
 	}
+	g_out_mode = (IS_ENABLED(CONFIG_SP1FX_LINEOUT_RESTORE) && boot_d.out_mode == OUT_MODE_LINE) ?
+		     OUT_MODE_LINE : OUT_MODE_HP;
+	boot_d.out_mode = g_out_mode;
 	/* the loaded state counts as saved: no write at boot unless something really changes */
 	st_last_len = store_encode(&boot_d, st_last_rec, sizeof(st_last_rec));
-	st_last_save_ms = k_uptime_get_32();
+	saveev_init(&sev, k_uptime_get_32());   /* nothing to save at boot */
 	feed_wdt();
 	const int boot_rejected = engine_apply_config(&eng, &boot_d.cfg);
 
-	store_debounce_init(&deb);
 	save_sched_init(&ssched);
 
 	controller_init(&ui, &eng);
@@ -1928,9 +2082,10 @@ int main(void)
 	}
 
 	const proto_config_t pc = {
-		.eng = &eng, .ctl = &ui, .sync = NULL, .deb = &deb, .tx = proto_tx,
+		.eng = &eng, .ctl = &ui, .sync = NULL, .deb = NULL, .tx = proto_tx,
 		.save = proto_save_now, .ctx = NULL, .fw = FW_VERSION, .block = BLK_FRAMES,
 		.bpm = boot_d.bpm, .sync_on = boot_d.sync_on, .power_flags = proto_power_flags,
+		.on_host_change = proto_host_change, .out_mode = g_out_mode,
 	};
 
 	proto_init(&proto, &pc);
@@ -2018,6 +2173,9 @@ int main(void)
 	uint16_t btn_seen = 0;
 	uint16_t lad_mask = 0;
 	bool stable_marked = false;
+	uint32_t ev_preset = ui.preset_flash_until;
+	uint8_t ev_mode = (uint8_t)ui.mode;
+	uint8_t ev_fx[4] = { eng.cfg.fx_id[0], eng.cfg.fx_id[1], eng.cfg.fx_id[2], eng.cfg.fx_id[3] };
 	struct shadow sh;
 
 	memset(&sh, 0, sizeof(sh));
@@ -2057,7 +2215,7 @@ int main(void)
 			con_printf("I SP-1 FX %s: USB audio + effects + controls + companion protocol. "
 				   "Text until the companion sends its first frame. resetreas=0x%x "
 				   "boot_rejected=%d store_load=%d (0 = saved settings) sync=%s bpm=%u "
-				   "trim=%d dB%s\r\n", FW_VERSION, (unsigned int)sp1fx_boot_resetreas,
+				   "trim=%d dB%s. Keys: d = diagnostics on/off, i = info now\r\n", FW_VERSION, (unsigned int)sp1fx_boot_resetreas,
 				   boot_rejected, st_load_rc, proto.sync_on ? "ON" : "off",
 				   (unsigned int)lrintf(proto.bpm), CONFIG_SP1FX_OUT_TRIM_DB,
 				   safe_boot ? " SAFE BOOT: 2+ early crashes in a row -> factory defaults, "
@@ -2126,10 +2284,31 @@ int main(void)
 		g_sync_bpm10 = (uint16_t)lrintf(proto.bpm * 10.0f);
 		g_sync_want = proto.sync_on;
 
-		/* ---- persistence: device-side changes (host-side ones mark deb in proto) ---- */
-		if (ui.change_seq != seen_change) {
+		/* ---- persistence (rc4, event-based): device events = preset switch, leaving
+		 * edit mode, an effect change; everything else the controller changes is a tweak
+		 * (host-side changes are classified in proto_host_change) ---- */
+		if (ui.change_seq != seen_change || (uint8_t)ui.mode != ev_mode) {
+			bool event = ui.preset_flash_until != ev_preset ||
+				     (ev_mode == UI_EDIT && ui.mode == UI_PERFORM);
+
+			for (int s2 = 0; s2 < 4; s2++) {
+				event |= eng.cfg.fx_id[s2] != ev_fx[s2];
+				ev_fx[s2] = eng.cfg.fx_id[s2];
+			}
+			if (event) {
+				saveev_event(&sev, now);
+				st_events++;
+			} else if (ui.change_seq != seen_change) {
+				saveev_tweak(&sev, now);
+				st_tweaks++;
+			}
 			seen_change = ui.change_seq;
-			store_debounce_mark(&deb, now);
+			ev_preset = ui.preset_flash_until;
+			ev_mode = (uint8_t)ui.mode;
+		}
+		/* ---- headphone-jack output mode from the companion (rc4) ---- */
+		if (proto.out_mode != g_out_mode) {
+			set_out_mode(proto.out_mode);
 		}
 		stage(ST_STORE);
 		storage_tick(now);
@@ -2186,14 +2365,24 @@ int main(void)
 
 		/* ---- text diagnostics ---- */
 		stage(ST_DIAG);
+		if (g_diag_note) {
+			g_diag_note = false;
+			con_printf("I diagnostics %s ('d' toggles, 'i' = one block now)\r\n",
+				   g_diag_on ? "ON every 2 s" : "off");
+		}
 		log_changes(&sh, now);
 		if ((int32_t)(now - next_diag) >= 0) {
 			next_diag = now + CONFIG_SP1FX_DIAG_PERIOD_MS;
-			if (conmode_text_ok(&conm)) {
-				log_diag(now, (diag_n % DETAIL_EVERY) == 0u);
+			if (g_diag_on && conmode_text_ok(&conm)) {
+				diag_start((diag_n % DETAIL_EVERY) == 0u);
 			}
 			diag_n++;
 		}
+		if (g_diag_req) {
+			g_diag_req = false;
+			diag_start(true);
+		}
+		log_diag_step(now);   /* at most one line per tick */
 
 		stage(ST_SLEEP);
 		next += TICK_MS;

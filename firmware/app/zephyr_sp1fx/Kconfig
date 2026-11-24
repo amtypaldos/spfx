@@ -9,7 +9,7 @@ config SP1FX_USB_CONSOLE
 
 config SP1FX_FW_VERSION
 	string "Firmware version string (HELLO_RSP, console banner)"
-	default "sp1fx-v1-rc3"
+	default "sp1fx-v1-rc4"
 
 config SP1FX_OUT_TRIM_DB
 	int "Fixed digital output trim after the engine limiter (dB, <= 0)"
@@ -22,6 +22,15 @@ config SP1FX_OUT_TRIM_DB
 	  |sample| <= 16423. The codecs keep their own analog limits
 	  (CS42L42 mixer -30 dB, TAS2505 +6 dB / -6 dB). The usbaudio images
 	  used -12 dB with no volume buttons.
+
+config SP1FX_LINEOUT_RESTORE
+	bool "Restore a saved 'line out' headphone-jack mode at power-up"
+	default y
+	help
+	  Line out is about 36 dB louder than the headphone setting. With y the
+	  saved mode is restored (the owner asked for it to be persisted); with
+	  n every start is in headphone mode. Factory reset, a first start and
+	  SAFE BOOT always start in headphone mode.
 
 config SP1FX_DIAG_PERIOD_MS
 	int "Period of the diagnostic text lines (ms)"

@@ -22,8 +22,12 @@ bool cs42_probe(uint8_t devid[3]);
 /* Full init (I2S frame master, 48 kHz from the 3.072 MHz SCLK). Leaves the
  * headphone output MUTED. Returns true if every register write ACKed. */
 bool cs42_configure(void);
-/* Headphone output on (unmute + low mixer volume) / off (mute). */
+/* Headphone output on (unmute + mixer volume) / off (mute). */
 bool cs42_hp_enable(bool on);
+/* Mixer attenuation used by cs42_hp_enable(true), in dB below the register maximum (0..63;
+ * 0x00 = 0 dB, 1 dB per step, per the Linux cs42l42 driver's mixer TLV). Default 30 (the
+ * hearing-safe headphone level of every image so far). Written at once when hp_on. */
+bool cs42_hp_set_att(uint8_t att_db, bool hp_on);
 /* 1 = headphones in the jack, 0 = not, -1 = I2C read failed. */
 int cs42_hp_present(void);
 /* PLL / clock status byte read during configure (diagnostics). */

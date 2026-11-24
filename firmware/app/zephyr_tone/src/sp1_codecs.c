@@ -280,13 +280,27 @@ bool cs42_configure(void)
 
 /* Called only while the digital signal is ramped to zero.
  * Order: on = mixer volume then analog unmute; off = analog mute then mixer. */
+static uint8_t hp_att = CS42_HP_MIX_ATT;
+
+bool cs42_hp_set_att(uint8_t att_db, bool hp_on)
+{
+	hp_att = att_db > 0x3Eu ? 0x3Eu : att_db;
+	if (!hp_on) {
+		return true;
+	}
+	bool ok = tpw(0x2301, hp_att);
+
+	ok &= tpw(0x2303, hp_att);
+	return ok;
+}
+
 bool cs42_hp_enable(bool on)
 {
 	bool ok = true;
 
 	if (on) {
-		ok &= tpw(0x2301, CS42_HP_MIX_ATT);
-		ok &= tpw(0x2303, CS42_HP_MIX_ATT);
+		ok &= tpw(0x2301, hp_att);
+		ok &= tpw(0x2303, hp_att);
 		ok &= tpw(0x2001, CS42_HP_CTL_ON);
 	} else {
 		ok &= tpw(0x2001, CS42_HP_CTL_MUTE);
