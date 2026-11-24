@@ -272,6 +272,10 @@ static void test_out_mode_extension(void)
 	d.out_mode = 1;
 	CHECK(store_save(&s, &d) == 0);
 	{ store_t r; store_init(&r, ops()); CHECK(store_load(&r, &out) == 0 && same(&out, &d) && out.out_mode == 1); }
+	d.out_mode = 2;
+	CHECK(store_save(&s, &d) == 0);
+	{ store_t r; store_init(&r, ops()); CHECK(store_load(&r, &out) == 0 && out.out_mode == 2); }
+	d.out_mode = 1;
 	/* an old-format record (exactly the v1 payload, no extension) -> headphones */
 	uint8_t pl[STORE_RECORD_BYTES];
 	uint16_t n = store_encode(&d, pl, sizeof pl);

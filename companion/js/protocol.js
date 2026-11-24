@@ -186,7 +186,7 @@ export function encodePayload(msg) {
     }
     case T.SET_BPM: w.u16(checkRange('bpm10', msg.bpm10, 300, 3000)); break;
     case T.SET_SYNC: w.u8(msg.on ? 1 : 0); break;
-    case T.SET_OUTPUT_MODE: w.u8(msg.mode === 1 ? 1 : 0); break;
+    case T.SET_OUTPUT_MODE: w.u8([0, 1, 2].includes(msg.mode) ? msg.mode : 0); break;
     case T.FACTORY_RESET: w.u8(msg.confirm ?? FACTORY_RESET_CONFIRM); break;
     case T.SUBSCRIBE: w.u8(checkRange('hz', msg.hz, 0, 20)); break;
 
@@ -241,7 +241,7 @@ export function decodePayload(type, payload) {
     }
     case T.SET_BPM: m = { type, bpm10: checkRange('bpm10', r.u16(), 300, 3000) }; break;
     case T.SET_SYNC: { const v = r.u8(); if (v > 1) throw new ProtocolError('sync must be 0 or 1'); m = { type, on: v === 1 }; break; }
-    case T.SET_OUTPUT_MODE: { const v = r.u8(); if (v > 1) throw new ProtocolError('output mode must be 0 or 1'); m = { type, mode: v }; break; }
+    case T.SET_OUTPUT_MODE: { const v = r.u8(); if (v > 2) throw new ProtocolError('output mode must be 0, 1 or 2'); m = { type, mode: v }; break; }
     case T.FACTORY_RESET: m = { type, confirm: r.u8() }; break;
     case T.SUBSCRIBE: m = { type, hz: checkRange('hz', r.u8(), 0, 20) }; break;
 
@@ -302,7 +302,7 @@ function encodeState(w, s) {
   w.u8(s.globalBypass ? 1 : 0).u8(s.syncOn ? 1 : 0).u8(fxCount).i16(s.inGainCdB).u16(n2u16(s.master)).u16(s.bpm10);
   for (let i = 0; i < 4; i++) w.u16(n2u16(s.wet[i]));
   for (let sl = 0; sl < 4; sl++) for (let f = 0; f < fxCount; f++) for (let p = 0; p < 4; p++) w.u16(n2u16(s.params[sl][f][p]));
-  w.u8(s.uiMode).u8(s.editSlot).u8(s.outMode === 1 ? 1 : 0);
+  w.u8(s.uiMode).u8(s.editSlot).u8([0, 1, 2].includes(s.outMode) ? s.outMode : 0);
 }
 function decodeState(r) {
   const fxId = [r.u8(), r.u8(), r.u8(), r.u8()];
@@ -322,7 +322,7 @@ function decodeState(r) {
   }
   const uiMode = r.u8(), editSlot = r.u8();
   const outMode = r.more() ? r.u8() : 0;   // firmware v1-rc4+: headphone-jack mode (older: absent = headphones)
-  if (outMode > 1) throw new ProtocolError('state: bad output mode');
+  if (outMode > 2) throw new ProtocolError('state: bad output mode');
   return { type: T.STATE, fxId, bypass, order, globalBypass, syncOn, fxCount, inGainCdB, master, bpm10, wet, params, uiMode, editSlot, outMode };
 }
 

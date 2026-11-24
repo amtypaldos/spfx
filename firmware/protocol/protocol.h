@@ -80,7 +80,7 @@ typedef struct {
 	uint16_t block;          /* audio block size reported in HELLO_RSP */
 	float bpm;               /* initial tempo (30..300) */
 	uint8_t sync_on;         /* initial sync-clock state (restored from the saved config) */
-	uint8_t out_mode;        /* initial headphone-jack mode: 0 headphones, 1 line out */
+	uint8_t out_mode;        /* initial headphone-jack mode: 0 headphones, 1 line out, 2 loud */
 	/* optional: called after every host-originated change with the request type (the app
 	 * decides what is worth saving) */
 	void (*on_host_change)(void *ctx, uint8_t type);
@@ -99,7 +99,7 @@ typedef struct {
 	proto_config_t c;
 	float bpm;          /* current tempo; persist {eng->cfg, bpm, sync_on} as store_data_t */
 	uint8_t sync_on;    /* sync-jack clock running */
-	uint8_t out_mode;   /* headphone jack: 0 headphones, 1 line out (the app applies it) */
+	uint8_t out_mode;   /* headphone jack: 0 headphones, 1 line out, 2 loud (the app applies it) */
 	int dirty;          /* set by every host-originated change; caller may clear */
 	uint32_t now_ms;    /* clock from the last proto_tick() */
 

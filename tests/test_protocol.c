@@ -815,15 +815,19 @@ static void test_output_mode(void)
 	request(PT_GET_STATE, 22, NULL, 0);
 	const frm_t *r = last_of(PT_STATE);
 	CHECK(r && r->len == 384 && r->pay[383] == 1);
-	v = 2;
+	v = 2; /* rc5: loud */
+	clear_tx();
+	request(PT_SET_OUTPUT_MODE, 25, &v, 1);
+	CHECK(result_code(PT_SET_OUTPUT_MODE, 25) == PR_OK && pr.out_mode == 2);
+	v = 3;
 	clear_tx();
 	request(PT_SET_OUTPUT_MODE, 23, &v, 1);
-	CHECK(result_code(PT_SET_OUTPUT_MODE, 23) == PR_BAD_ARG && pr.out_mode == 1);
+	CHECK(result_code(PT_SET_OUTPUT_MODE, 23) == PR_BAD_ARG && pr.out_mode == 2);
 	/* factory reset returns to headphones */
 	uint8_t c = PROTO_FACTORY_RESET_CONFIRM;
 	request(PT_FACTORY_RESET, 24, &c, 1);
 	CHECK(pr.out_mode == 0);
-	CHECK(hc_n == 2 && hc_types[1] == PT_FACTORY_RESET); /* the rejected request did not count */
+	CHECK(hc_n == 3 && hc_types[2] == PT_FACTORY_RESET); /* the rejected request did not count */
 	pr.c.on_host_change = NULL;
 }
 

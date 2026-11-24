@@ -211,11 +211,11 @@ test('STATE rejects bad order / truncated', () => {
 });
 
 test('SET_OUTPUT_MODE and STATE out_mode (firmware v1-rc4), old STATE without it', () => {
-  for (const mode of [0, 1]) {
+  for (const mode of [0, 1, 2]) {
     const m = { type: T.SET_OUTPUT_MODE, mode };
     assert.deepEqual(decodePayload(T.SET_OUTPUT_MODE, encodePayload(m)), m);
   }
-  assert.throws(() => decodePayload(T.SET_OUTPUT_MODE, Uint8Array.from([2])));
+  assert.throws(() => decodePayload(T.SET_OUTPUT_MODE, Uint8Array.from([3])));
   const st = { type: T.STATE, fxId: [1, 2, 3, 4], bypass: [true, false, true, false], order: [0, 1, 2, 3], globalBypass: false,
     syncOn: false, fxCount: 2, inGainCdB: 0, master: 0.75, bpm10: 1200, wet: [0.5, 0.5, 0.5, 0.5],
     params: Array.from({ length: 4 }, () => [[0, 0, 0, 0], [0, 0, 0, 0]]), uiMode: 0, editSlot: 0, outMode: 1 };

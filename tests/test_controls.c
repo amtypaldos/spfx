@@ -224,6 +224,21 @@ static void test_output_mode_levels(void)
 		CHECK_MSG(after <= before + 1e-3f, "m=%g: %g -> %g dB", m, before, after); /* never louder */
 		if (m >= 0.6f + 1.0f / VOL_STEPS) CHECK_NEAR(after, before, 1e-3);      /* same level when possible */
 	}
+	/* rc5: three levels; every upward switch keeps the jack level, downward keeps master */
+	CHECK(vol_mode_extra_db(OUT_MODE_HP) == 0 && vol_mode_extra_db(OUT_MODE_LOUD) == 15 &&
+	      vol_mode_extra_db(OUT_MODE_LINE) == 36);
+	for (int from = 0; from < OUT_MODE_COUNT; from++)
+		for (int to = 0; to < OUT_MODE_COUNT; to++)
+			for (int k = 0; k <= VOL_STEPS; k++) {
+				float m = (float)k / VOL_STEPS, m2 = vol_master_for_mode_switch(m, from, to);
+				out_levels_t a = vol_out_levels(from, 1), b = vol_out_levels(to, 1);
+				float before = m < VOL_MUTE_BELOW ? -200.0f : vol_master_db(m) + a.trim_db - a.mix_att_db;
+				float after = m2 < VOL_MUTE_BELOW ? -200.0f : vol_master_db(m2) + b.trim_db - b.mix_att_db;
+				CHECK(after <= before + 1e-3f);
+				if (vol_mode_extra_db(to) <= vol_mode_extra_db(from)) CHECK_NEAR(m2, vol_step(m, 0), 1e-6);
+			}
+	out_levels_t ld = vol_out_levels(OUT_MODE_LOUD, 1);
+	CHECK(ld.mix_att_db == 15 && ld.trim_db == -6);
 	/* back to headphones keeps master (quieter by 36 dB) */
 	CHECK_NEAR(vol_master_for_mode_switch(0.5f, OUT_MODE_LINE, OUT_MODE_HP), 0.5, 1e-6);
 	CHECK_NEAR(vol_master_for_mode_switch(1.0f, OUT_MODE_LINE, OUT_MODE_LINE), 1.0, 1e-6);

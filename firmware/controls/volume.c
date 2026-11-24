@@ -39,6 +39,9 @@ out_levels_t vol_out_levels(int mode, int jack)
 	} else if (mode == OUT_MODE_LINE) {
 		l.mix_att_db = OUT_LINE_MIX_ATT_DB;
 		l.trim_db = OUT_LINE_TRIM_DB;
+	} else if (mode == OUT_MODE_LOUD) {
+		l.mix_att_db = OUT_LOUD_MIX_ATT_DB;
+		l.trim_db = OUT_LOUD_TRIM_DB;
 	} else {
 		l.mix_att_db = OUT_HP_MIX_ATT_DB;
 		l.trim_db = OUT_HP_TRIM_DB;
@@ -46,16 +49,23 @@ out_levels_t vol_out_levels(int mode, int jack)
 	return l;
 }
 
+int vol_mode_extra_db(int mode)
+{
+	out_levels_t m = vol_out_levels(mode, 1), h = vol_out_levels(OUT_MODE_HP, 1);
+	return (h.mix_att_db - m.mix_att_db) + (m.trim_db - h.trim_db);
+}
+
 int vol_line_extra_db(void)
 {
-	return (OUT_HP_MIX_ATT_DB - OUT_LINE_MIX_ATT_DB) + (OUT_LINE_TRIM_DB - OUT_HP_TRIM_DB);
+	return vol_mode_extra_db(OUT_MODE_LINE);
 }
 
 float vol_master_for_mode_switch(float m, int from, int to)
 {
 	if (!(m == m)) m = 0.0f;
-	if (from == to || to != OUT_MODE_LINE) return vol_step(m, 0);
-	float n = m - (float)vol_line_extra_db() / VOL_DB_RANGE;
+	const int up = vol_mode_extra_db(to) - vol_mode_extra_db(from);
+	if (up <= 0) return vol_step(m, 0);
+	float n = m - (float)up / VOL_DB_RANGE;
 	if (n < 0.0f) n = 0.0f;
 	/* round DOWN to the grid: never louder than before */
 	float k = floorf(n * (float)VOL_STEPS + 1e-3f);

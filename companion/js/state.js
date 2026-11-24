@@ -30,7 +30,7 @@ export function applyState(m, s) {
   m.order = s.order.slice();
   m.globalBypass = s.globalBypass;
   m.syncOn = !!s.syncOn;
-  m.outMode = s.outMode === 1 ? 1 : 0;
+  m.outMode = [0, 1, 2].includes(s.outMode) ? s.outMode : 0;
   m.inGainDb = s.inGainCdB / 100;
   m.master = s.master;
   m.bpm = s.bpm10 / 10;

@@ -23,7 +23,7 @@ typedef struct {
 	engine_config_t cfg;
 	float bpm; /* 30..300 */
 	uint8_t sync_on; /* sync-jack clock running; saved and restored at power-up */
-	uint8_t out_mode; /* headphone jack: 0 headphones (default), 1 line out (rc4). Kept in a
+	uint8_t out_mode; /* headphone jack: 0 headphones (default), 1 line out, 2 loud. Kept in a
 	                   * journal extension byte AFTER the v1 payload, not in store_encode()
 	                   * (the protocol STATE carries it separately). */
 } store_data_t;

@@ -163,7 +163,7 @@ void proto_init(proto_t *p, const proto_config_t *cfg)
 	if (!p->c.block) p->c.block = FX_MAX_BLOCK;
 	p->bpm = (cfg->bpm >= 30.0f && cfg->bpm <= 300.0f) ? cfg->bpm : 120.0f;
 	p->sync_on = cfg->sync_on ? 1 : 0;
-	p->out_mode = cfg->out_mode == 1 ? 1 : 0;
+	p->out_mode = cfg->out_mode <= 2 ? cfg->out_mode : 0;
 	if (p->c.sync) {
 		sync_out_set_bpm(p->c.sync, p->bpm);
 		if (p->sync_on) sync_out_start(p->c.sync); /* resume the clock saved before power-off */
@@ -334,7 +334,7 @@ static void handle(proto_t *p, const proto_frame_t *f)
 		break;
 	case PT_SET_OUTPUT_MODE:
 		NEED(1);
-		if (a[0] > 1) { code = PR_BAD_ARG; break; }
+		if (a[0] > 2) { code = PR_BAD_ARG; break; } /* 0 headphones, 1 line out, 2 loud */
 		p->out_mode = a[0];
 		break;
 	case PT_SAVE_NOW:

@@ -119,7 +119,7 @@ static int read_record(store_t *s, int page, int slot, uint32_t *seq_out, store_
 		/* extension: out_mode right after the v1 payload, if the record has it */
 		const uint32_t fxn = rec[HDR_BYTES + 14]; /* the record's own fx_count */
 		const uint32_t base = 15u + 6u + 8u + (uint32_t)ENGINE_SLOTS * fxn * FX_MAX_PARAMS * 2u;
-		data->out_mode = (len > base && rec[HDR_BYTES + base] == 1) ? 1 : 0;
+		data->out_mode = (len > base && rec[HDR_BYTES + base] <= 2) ? rec[HDR_BYTES + base] : 0;
 	}
 	if (seq_out) *seq_out = seq;
 	return 1;
@@ -193,7 +193,7 @@ int store_job_begin(store_t *s, const store_data_t *d, store_job_t *j)
 	uint16_t len = store_encode(d, payload, sizeof payload);
 	if (!len || len >= sizeof payload) return -2;
 	/* extension bytes after the v1 payload (older firmware ignores them, see read_record) */
-	payload[len++] = d->out_mode == 1 ? 1 : 0;
+	payload[len++] = d->out_mode <= 2 ? d->out_mode : 0;
 
 	int page = s->active_page, slot = s->next_slot;
 	if (page < 0) {
