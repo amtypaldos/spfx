@@ -235,3 +235,13 @@ test('PRESET_LOADED (0xA3) round trip', () => {
   assert.ok(r.ok);
   assert.deepEqual(r.msg, { type: T.PRESET_LOADED, idx: 5, bpm10: 1234 });
 });
+
+test('SET_SYNC round trip and validation', () => {
+  for (const on of [true, false]) {
+    const f = buildFrame({ type: T.SET_SYNC, on }, 4);
+    const r = parseFrame(decodeFrame(f.subarray(0, f.length - 1)));
+    assert.ok(r.ok); assert.deepEqual(r.msg, { type: T.SET_SYNC, on });
+  }
+  const bad = encodeFrame({ type: T.SET_SYNC, seq: 1, payload: Uint8Array.of(2) });
+  assert.equal(parseFrame(decodeFrame(bad.subarray(0, bad.length - 1))).ok, false);
+});

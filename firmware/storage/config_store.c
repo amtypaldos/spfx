@@ -35,9 +35,10 @@ void store_data_default(store_data_t *d)
 {
 	engine_config_default(&d->cfg);
 	d->bpm = 120.0f;
+	d->sync_on = 0;
 }
 
-/* layout: fx_id[4] bypass[4] order[4] global reserved fx_count | in_gain_cdB(i16) master bpm_x10 | wet[4] | params[4][fx_count][4] */
+/* layout: fx_id[4] bypass[4] order[4] global sync_on fx_count | in_gain_cdB(i16) master bpm_x10 | wet[4] | params[4][fx_count][4] */
 uint16_t store_encode(const store_data_t *d, uint8_t *p, uint16_t cap)
 {
 	uint16_t need = (uint16_t)(15 + 2 + 2 + 2 + 8 + ENGINE_SLOTS * FX_COUNT * FX_MAX_PARAMS * 2);
@@ -47,7 +48,7 @@ uint16_t store_encode(const store_data_t *d, uint8_t *p, uint16_t cap)
 	for (int s = 0; s < ENGINE_SLOTS; s++) *w++ = d->cfg.bypass[s];
 	for (int s = 0; s < ENGINE_SLOTS; s++) *w++ = d->cfg.order[s];
 	*w++ = d->cfg.global_bypass;
-	*w++ = 0;
+	*w++ = d->sync_on ? 1 : 0; /* was reserved(0): old records read as sync off */
 	*w++ = FX_COUNT;
 	float g = d->cfg.in_gain_db;
 	if (!(g >= -12.0f)) g = -12.0f;
@@ -75,7 +76,7 @@ int store_decode(const uint8_t *p, uint16_t len, uint16_t layout_version, store_
 	for (int s = 0; s < ENGINE_SLOTS; s++) out->cfg.bypass[s] = *r++;
 	for (int s = 0; s < ENGINE_SLOTS; s++) out->cfg.order[s] = *r++;
 	out->cfg.global_bypass = *r++;
-	r++; /* reserved */
+	out->sync_on = *r++ == 1 ? 1 : 0;
 	int stored_fx = *r++;
 	out->cfg.in_gain_db = (float)(int16_t)get16(r) / 100.0f; r += 2;
 	out->cfg.master = uq16(get16(r)); r += 2;

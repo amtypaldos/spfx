@@ -27,7 +27,7 @@ enum {
 	PT_HELLO = 0x01, PT_GET_FX = 0x02, PT_GET_STATE = 0x03,
 	PT_SET_SLOT_FX = 0x10, PT_SET_PARAM = 0x11, PT_SET_WET = 0x12, PT_SET_BYPASS = 0x13,
 	PT_SET_GLOBAL_BYPASS = 0x14, PT_SET_MASTER = 0x15, PT_SET_INPUT_GAIN = 0x16,
-	PT_SET_ORDER = 0x17, PT_SET_BPM = 0x18,
+	PT_SET_ORDER = 0x17, PT_SET_BPM = 0x18, PT_SET_SYNC = 0x19,
 	PT_SAVE_NOW = 0x20, PT_FACTORY_RESET = 0x21, PT_SUBSCRIBE = 0x30,
 	PT_HELLO_RSP = 0x81, PT_FX_DESC = 0x82, PT_STATE = 0x83, PT_RESULT = 0x90,
 	PT_EVENT = 0xA0, PT_ADMISSION_ERROR = 0xA1, PT_METERS = 0xA2, PT_PRESET_LOADED = 0xA3
@@ -79,6 +79,7 @@ typedef struct {
 	const char *fw;          /* firmware version string for HELLO_RSP (<= 64 chars) */
 	uint16_t block;          /* audio block size reported in HELLO_RSP */
 	float bpm;               /* initial tempo (30..300) */
+	uint8_t sync_on;         /* initial sync-clock state (restored from the saved config) */
 } proto_config_t;
 
 typedef struct {
@@ -90,7 +91,8 @@ typedef struct {
 
 typedef struct {
 	proto_config_t c;
-	float bpm;          /* current tempo; persist {eng->cfg, bpm} as store_data_t */
+	float bpm;          /* current tempo; persist {eng->cfg, bpm, sync_on} as store_data_t */
+	uint8_t sync_on;    /* sync-jack clock running */
 	int dirty;          /* set by every host-originated change; caller may clear */
 	uint32_t now_ms;    /* clock from the last proto_tick() */
 

@@ -899,6 +899,56 @@ static void test_preset_loaded_event(void)
 	CHECK_NEAR(pr.bpm, factory_presets[0].bpm, 0.06);
 }
 
+static void test_sync_clock_switch(void)
+{
+	setup_budget(ENGINE_DEFAULT_CPU_BUDGET);
+	/* off by default: no clock */
+	sync_out_events_t e = sync_out_advance(&syn, 48000);
+	CHECK(e.midi_ticks == 0 && !e.start);
+	/* SET_SYNC on: MIDI Start then clock ticks; state is dirty so it gets saved */
+	uint8_t on[1] = {1}, off[1] = {0}, bad[1] = {2};
+	pr.dirty = 0;
+	clear_tx(); request(PT_SET_SYNC, 3, on, 1);
+	CHECK(result_code(PT_SET_SYNC, 3) == 0);
+	CHECK(pr.sync_on == 1 && pr.dirty == 1);
+	e = sync_out_advance(&syn, 48000);
+	CHECK(e.start == 1 && e.midi_ticks >= 48);
+	/* STATE reports it (the old reserved byte, offset 13 of the payload) and the saved record keeps it */
+	clear_tx(); request(PT_GET_STATE, 4, NULL, 0);
+	const frm_t *st = last_of(PT_STATE);
+	CHECK(st && st->len > 20 && st->pay[13] == 1);
+	store_data_t d, back;
+	store_data_default(&d);
+	d.sync_on = 1;
+	uint8_t buf[512];
+	uint16_t n = store_encode(&d, buf, sizeof buf);
+	CHECK(store_decode(buf, n, STORE_LAYOUT_VERSION, &back) == 0 && back.sync_on == 1);
+	/* bad value rejected, state unchanged */
+	clear_tx(); request(PT_SET_SYNC, 5, bad, 1);
+	CHECK(result_code(PT_SET_SYNC, 5) == PR_BAD_ARG);
+	CHECK(pr.sync_on == 1);
+	/* off: MIDI Stop once, then silence */
+	request(PT_SET_SYNC, 6, off, 1);
+	e = sync_out_advance(&syn, 4800);
+	CHECK(e.stop == 1);
+	e = sync_out_advance(&syn, 48000);
+	CHECK(e.midi_ticks == 0);
+	/* power-up resume: a saved "on" starts the clock by itself, at the saved tempo */
+	proto_config_t c = {0};
+	sync_out_init(&syn, SR);
+	c.eng = &eng; c.ctl = &ui; c.sync = &syn; c.deb = &deb; c.tx = tx; c.save = save_cb;
+	c.fw = "x"; c.block = 64; c.bpm = 90.0f; c.sync_on = 1;
+	proto_init(&pr, &c);
+	e = sync_out_advance(&syn, 48000);
+	CHECK(e.start == 1 && e.midi_ticks >= 35 && e.midi_ticks <= 37); /* 90 BPM: 36 ticks/s */
+	/* factory reset turns the clock off */
+	uint8_t confirm[1] = {PROTO_FACTORY_RESET_CONFIRM};
+	request(PT_FACTORY_RESET, 7, confirm, 1);
+	CHECK(pr.sync_on == 0);
+	e = sync_out_advance(&syn, 4800);
+	CHECK(e.stop == 1);
+}
+
 int main(void)
 {
 	RUN(test_crc16);
@@ -915,6 +965,7 @@ int main(void)
 	RUN(test_no_echo_of_host_changes);
 	RUN(test_device_events);
 	RUN(test_preset_loaded_event);
+	RUN(test_sync_clock_switch);
 	RUN(test_subscribe_timing);
 	RUN(test_meters_content);
 	RUN(test_factory_reset);

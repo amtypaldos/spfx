@@ -19,8 +19,8 @@ Evidence key: **[HOST]** verified by automated tests on a development Mac. **[SR
 | Preset cycling (ADR-004) | FN + rocker, fade, flash + position bar, `PRESET_LOADED` event, C + companion. **[HOST]** Device-side user presets: **[TODO]** |
 | Guide (`docs/guide/`) | printable quick-reference (schematic device drawing). |
 
-## Test results (`make test`: 6 C suites; `node --test companion/tests/*.test.mjs`: 53; all pass)
-- Also: `test_storage` 1,426 checks, `test_protocol` 885, `test_presets` 557, `test_controls` 172.
+## Test results (`make test`: 6 C suites; `node --test companion/tests/*.test.mjs`: 55; all pass)
+- Also: `test_storage` 1,426 checks, `test_protocol` 903, `test_presets` 557, `test_controls` 172.
 - `test_dsp`: 2,382 checks. Parameter map/unmap, silence, 16 parameter corners x every effect with loud noise, automation stability, stereo isolation, filter frequency response (LP/HP), delay timing exact to the sample, feedback ratio, reverb decay, chorus delay, tremolo depth, compressor level, fast-math accuracy, recovery after NaN.
 - `test_engine`: 36,924 checks. Wet/dry, bypass, global bypass, assignment preserves wet/bypass and per-effect params, memory + CPU admission with rollback, 2,000 random reassignments never overlap memory, multiple instances, NaN/Inf input, hot-signal limiter, no pops when switching effects, tails survive bypass, config repair, chain order.
 - `test_controls`: 119 checks. Debounce, tap vs hold, rocker only on held channel (and only if pressed after it), wrap-around, repeat, chord, PLAY, volume steps/repeat, edit mode, soft takeover (approach, cross-over, jitter, NaN, resync), FN-hold power-off, admission error LED, LED encodings, sync scheduling over a simulated 10 min.
@@ -50,7 +50,7 @@ Evidence key: **[HOST]** verified by automated tests on a development Mac. **[SR
 ## Known discrepancies / open items (from review)
 - Reverb memory: firmware declares 43,116 B, the companion's table says 43,120 (aligned). Cosmetic; the device is authoritative for admission.
 - Companion admission prediction sums memBytes only; the engine also counts state bytes and fragmentation.
-- Sync jack: BPM is stored and scheduled, but no hardware driver, no start/stop trigger, and no tempo-synced effect exists yet (decision pending).
+- Sync jack: BPM and an on/off switch (companion only, **saved and restored at power-up**, not part of presets) are stored and scheduled. Still missing: the hardware driver for the jack pins (timer-driven MIDI/PO output, untested upstream) and any tempo-synced effect.
 - METERS resets held peaks, which also affects the output-level LEDs while a host is subscribed.
 - Event ring drops the oldest events silently if the host stops polling.
 - Bug found in review: companion step-parameter mapping (round vs floor) disagreed with firmware; fixed and tested.

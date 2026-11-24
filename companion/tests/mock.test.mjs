@@ -234,3 +234,21 @@ test('device-loaded preset (0xA3): companion re-reads the whole state', async ()
   assert.equal(Math.round(store.model.bpm * 10), 987);
   assert.ok(notices.some((n) => /preset 4/i.test(n.text)));
 });
+
+test('sync clock switch: host sets it, device state reports it, no echo', async () => {
+  const { dev, tr, store, ctl } = rig();
+  await ctl.connect(tr, 'demo');
+  assert.equal(store.model.syncOn, false);
+  const events = [];
+  const orig = ctl.client.onEvent;
+  ctl.client.onEvent = (m) => { events.push(m); orig(m); };
+  await ctl.setSync(true);
+  await settle(10);
+  assert.equal(dev.s.syncOn, true);
+  assert.equal(store.model.syncOn, true);
+  assert.deepEqual(events.filter((e) => e.type === T.EVENT), []);
+  await ctl.refreshState();
+  assert.equal(store.model.syncOn, true, 'STATE carries the saved sync flag');
+  await ctl.setSync(false);
+  assert.equal(dev.s.syncOn, false);
+});

@@ -22,6 +22,7 @@
 typedef struct {
 	engine_config_t cfg;
 	float bpm; /* 30..300 */
+	uint8_t sync_on; /* sync-jack clock running; saved and restored at power-up */
 } store_data_t;
 
 /* page_index is 0 or 1 (the two journal pages). Offsets are relative to the page. */

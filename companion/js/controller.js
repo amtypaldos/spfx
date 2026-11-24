@@ -155,6 +155,7 @@ export class Controller {
   setMaster(v) { return this._edit({ type: T.SET_MASTER, v }, { coalesceKey: 'master' }); }
   setInputGainDb(db) { return this._edit({ type: T.SET_INPUT_GAIN, cdB: Math.round(Math.min(12, Math.max(-12, db)) * 100) }, { coalesceKey: 'gain' }); }
   setOrder(order) { return this._edit({ type: T.SET_ORDER, order }); }
+  setSync(on) { return this._edit({ type: T.SET_SYNC, on: !!on }); }
   setBpm(bpm) { return this._edit({ type: T.SET_BPM, bpm10: Math.round(Math.min(300, Math.max(30, bpm)) * 10) }); }
 
   /** Reset the active effect's four parameters in a slot to their defaults. */

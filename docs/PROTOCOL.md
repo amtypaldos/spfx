@@ -34,6 +34,7 @@ Max body 512 bytes (payload 500 + 5 bytes of overhead + COBS expansion is handle
 | 0x16 | SET_INPUT_GAIN | `cdB i16` (-1200..1200) | 0x90 |
 | 0x17 | SET_ORDER | `o0..o3 u8` (permutation of 0..3) | 0x90 |
 | 0x18 | SET_BPM | `bpm10 u16` (300..3000) | 0x90 |
+| 0x19 | SET_SYNC | `on u8` (0 or 1): start/stop the sync-jack clock (MIDI clock + PO pulses) | 0x90 |
 | 0x20 | SAVE_NOW | - | 0x90 |
 | 0x21 | FACTORY_RESET | `0xA5` (confirmation byte) | 0x90 |
 | 0x30 | SUBSCRIBE | `hz u8` (0 = off, 1..20) | 0x90 |
@@ -43,7 +44,7 @@ Max body 512 bytes (payload 500 + 5 bytes of overhead + COBS expansion is handle
 
 **0x82 FX_DESC**: `id u8, name_len u8, name, nparams u8, cpu_cycles u16, mem_bytes u32, tail_ms u32, mix_mode u8 (0 crossfade, 1 send)`, then per param: `name_len u8, name, unit_len u8, unit, min f32, max f32, def f32, scale u8 (0 lin, 1 log, 2 step), labels_len u8, labels` (labels is a comma-separated list for step params, else empty). Floats are IEEE-754 little-endian.
 
-**0x83 STATE**: the config payload exactly as `store_encode()` produces it (see `firmware/storage/config_store.c`): `fx_id[4] bypass[4] order[4] global u8, reserved u8, fx_count u8, in_gain_cdB i16, master u16n, bpm10 u16, wet[4] u16n, params[4][fx_count][4] u16n`, followed by `ui_mode u8 (0 perform, 1 edit), edit_slot u8`. `params` holds the remembered values for **every** effect in every slot, not just the active one.
+**0x83 STATE**: the config payload exactly as `store_encode()` produces it (see `firmware/storage/config_store.c`): `fx_id[4] bypass[4] order[4] global u8, sync_on u8 (was reserved; 0 or 1), fx_count u8, in_gain_cdB i16, master u16n, bpm10 u16, wet[4] u16n, params[4][fx_count][4] u16n`, followed by `ui_mode u8 (0 perform, 1 edit), edit_slot u8`. `params` holds the remembered values for **every** effect in every slot, not just the active one.
 
 **0x90 RESULT**: `request_type u8, code u8` (matched to its request by `seq`; it does not carry the slot, so a host that sees a non-zero code should re-read GET_STATE). A GET_FX with an out-of-range index is answered with 0x90 code 1. FACTORY_RESET has no event; the host re-reads GET_STATE afterwards. Codes: 0 ok, 1 bad argument, 2 out of DSP memory, 3 CPU budget exceeded, 4 busy, 5 storage error. On 2 or 3 the previous assignment is unchanged.
 
@@ -60,6 +61,7 @@ Max body 512 bytes (payload 500 + 5 bytes of overhead + COBS expansion is handle
 - `order[position]` holds the **slot index** processed at that position (a permutation of 0..3).
 - Normalised-to-real mapping: `lin`: `min + n*(max-min)`; `log`: `min*(max/min)^n`; `step`: `min + floor(n*(max-min+1))`, capped at `max`.
 - Admission (what 0x90 codes 2 and 3 mean): the device checks the **CPU budget first**, then memory, summed over all four slots, with the replaced slot's own effect excluded. The companion may predict this, but the device decides.
+- **Sync clock** (`SET_SYNC`): on = the device sends MIDI Start then 24 PPQN clock on the sync jack ring and 2 PPQN pulses on the tip; off = MIDI Stop. The state is **saved** and restored at power-up (the clock starts itself if it was on). It is a device setting, not part of a preset; loading a preset changes the BPM but never the on/off state.
 - `ui_mode` and `edit_slot` are reported only; there is no message to set them.
 
 ## Rules

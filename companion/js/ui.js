@@ -89,6 +89,7 @@ export function mountUI({ store, ctl, library, env }) {
   bind($('master'), () => ctl.setMaster(Number($('master').value) / RANGE_MAX));
   bind($('gain'), () => ctl.setInputGainDb(Number($('gain').value) / 10));
   $('gBypass').addEventListener('click', () => ctl.setGlobalBypass(!store.model.globalBypass));
+  $('gSync').addEventListener('click', () => ctl.setSync(!store.model.syncOn));
   $('bpm').addEventListener('change', () => {
     const v = Number($('bpm').value);
     if (Number.isFinite(v) && $('bpm').value !== '') ctl.setBpm(v); else renderGlobal(store.model);
@@ -210,6 +211,7 @@ export function mountUI({ store, ctl, library, env }) {
   // ---------- global / tiles ----------
   function renderGlobal(m) {
     $('gBypass').setAttribute('aria-pressed', String(m.globalBypass));
+    $('gSync').setAttribute('aria-pressed', String(m.syncOn));
     setRange($('master'), m.master); $('masterVal').textContent = `${Math.round(m.master * 100)} %`;
     $('master').setAttribute('aria-valuetext', $('masterVal').textContent);
     const g = $('gain');

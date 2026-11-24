@@ -162,6 +162,11 @@ void proto_init(proto_t *p, const proto_config_t *cfg)
 	if (!p->c.fw) p->c.fw = "sp1fx";
 	if (!p->c.block) p->c.block = FX_MAX_BLOCK;
 	p->bpm = (cfg->bpm >= 30.0f && cfg->bpm <= 300.0f) ? cfg->bpm : 120.0f;
+	p->sync_on = cfg->sync_on ? 1 : 0;
+	if (p->c.sync) {
+		sync_out_set_bpm(p->c.sync, p->bpm);
+		if (p->sync_on) sync_out_start(p->c.sync); /* resume the clock saved before power-off */
+	}
 }
 
 /* ------------------------------------------------------------ requests */
@@ -214,6 +219,7 @@ static size_t build_state(proto_t *p, uint8_t *out, size_t cap)
 	store_data_t d;
 	d.cfg = p->c.eng->cfg;
 	d.bpm = p->bpm;
+	d.sync_on = p->sync_on;
 	uint16_t n = store_encode(&d, out, (uint16_t)(cap - 2));
 	if (n == 0) return 0;
 	out[n] = p->c.ctl ? (uint8_t)p->c.ctl->mode : 0;
@@ -317,6 +323,12 @@ static void handle(proto_t *p, const proto_frame_t *f)
 		if (p->c.sync) sync_out_set_bpm(p->c.sync, p->bpm);
 		break;
 	}
+	case PT_SET_SYNC:
+		NEED(1);
+		if (a[0] > 1) { code = PR_BAD_ARG; break; }
+		p->sync_on = a[0];
+		if (p->c.sync) { if (p->sync_on) sync_out_start(p->c.sync); else sync_out_stop(p->c.sync); }
+		break;
 	case PT_SAVE_NOW:
 		NEED(0);
 		code = (p->c.save && p->c.save(p->c.ctx) == 0) ? PR_OK : PR_STORAGE;
@@ -329,7 +341,8 @@ static void handle(proto_t *p, const proto_frame_t *f)
 		store_data_default(&d);
 		int rej = engine_apply_config(e, &d.cfg);
 		p->bpm = d.bpm;
-		if (p->c.sync) sync_out_set_bpm(p->c.sync, p->bpm);
+		p->sync_on = d.sync_on;
+		if (p->c.sync) { sync_out_set_bpm(p->c.sync, p->bpm); if (p->sync_on) sync_out_start(p->c.sync); else sync_out_stop(p->c.sync); }
 		memset(p->ev_wet, 0, sizeof p->ev_wet);
 		memset(p->ev_param, 0, sizeof p->ev_param);
 		code = rej ? PR_NO_MEMORY : PR_OK;

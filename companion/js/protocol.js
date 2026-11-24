@@ -17,7 +17,7 @@ export class ProtocolError extends Error {
 export const T = Object.freeze({
   HELLO: 0x01, GET_FX: 0x02, GET_STATE: 0x03,
   SET_SLOT_FX: 0x10, SET_PARAM: 0x11, SET_WET: 0x12, SET_BYPASS: 0x13, SET_GLOBAL_BYPASS: 0x14,
-  SET_MASTER: 0x15, SET_INPUT_GAIN: 0x16, SET_ORDER: 0x17, SET_BPM: 0x18,
+  SET_MASTER: 0x15, SET_INPUT_GAIN: 0x16, SET_ORDER: 0x17, SET_BPM: 0x18, SET_SYNC: 0x19,
   SAVE_NOW: 0x20, FACTORY_RESET: 0x21, SUBSCRIBE: 0x30,
   HELLO_RSP: 0x81, FX_DESC: 0x82, STATE: 0x83, RESULT: 0x90,
   EVENT: 0xA0, ADMISSION_ERROR: 0xA1, METERS: 0xA2, PRESET_LOADED: 0xA3,
@@ -25,7 +25,7 @@ export const T = Object.freeze({
 export const TYPE_NAMES = Object.freeze(Object.fromEntries(Object.entries(T).map(([k, v]) => [v, k])));
 export const SETTER_TYPES = Object.freeze([
   T.SET_SLOT_FX, T.SET_PARAM, T.SET_WET, T.SET_BYPASS, T.SET_GLOBAL_BYPASS,
-  T.SET_MASTER, T.SET_INPUT_GAIN, T.SET_ORDER, T.SET_BPM,
+  T.SET_MASTER, T.SET_INPUT_GAIN, T.SET_ORDER, T.SET_BPM, T.SET_SYNC,
 ]);
 export const RESULT = Object.freeze({ OK: 0, BAD_ARG: 1, NO_MEMORY: 2, NO_CPU: 3, BUSY: 4, STORAGE: 5 });
 export const FACTORY_RESET_CONFIRM = 0xA5;
@@ -184,6 +184,7 @@ export function encodePayload(msg) {
       break;
     }
     case T.SET_BPM: w.u16(checkRange('bpm10', msg.bpm10, 300, 3000)); break;
+    case T.SET_SYNC: w.u8(msg.on ? 1 : 0); break;
     case T.FACTORY_RESET: w.u8(msg.confirm ?? FACTORY_RESET_CONFIRM); break;
     case T.SUBSCRIBE: w.u8(checkRange('hz', msg.hz, 0, 20)); break;
 
@@ -236,6 +237,7 @@ export function decodePayload(type, payload) {
       m = { type, order }; break;
     }
     case T.SET_BPM: m = { type, bpm10: checkRange('bpm10', r.u16(), 300, 3000) }; break;
+    case T.SET_SYNC: { const v = r.u8(); if (v > 1) throw new ProtocolError('sync must be 0 or 1'); m = { type, on: v === 1 }; break; }
     case T.FACTORY_RESET: m = { type, confirm: r.u8() }; break;
     case T.SUBSCRIBE: m = { type, hz: checkRange('hz', r.u8(), 0, 20) }; break;
 
@@ -288,7 +290,7 @@ function encodeState(w, s) {
   for (let i = 0; i < 4; i++) w.u8(s.fxId[i]);
   for (let i = 0; i < 4; i++) w.u8(s.bypass[i] ? 1 : 0);
   for (let i = 0; i < 4; i++) w.u8(s.order[i]);
-  w.u8(s.globalBypass ? 1 : 0).u8(0).u8(fxCount).i16(s.inGainCdB).u16(n2u16(s.master)).u16(s.bpm10);
+  w.u8(s.globalBypass ? 1 : 0).u8(s.syncOn ? 1 : 0).u8(fxCount).i16(s.inGainCdB).u16(n2u16(s.master)).u16(s.bpm10);
   for (let i = 0; i < 4; i++) w.u16(n2u16(s.wet[i]));
   for (let sl = 0; sl < 4; sl++) for (let f = 0; f < fxCount; f++) for (let p = 0; p < 4; p++) w.u16(n2u16(s.params[sl][f][p]));
   w.u8(s.uiMode).u8(s.editSlot);
@@ -298,7 +300,7 @@ function decodeState(r) {
   const bypass = [r.u8() !== 0, r.u8() !== 0, r.u8() !== 0, r.u8() !== 0];
   const order = [r.u8(), r.u8(), r.u8(), r.u8()];
   if (!isPermutation(order)) throw new ProtocolError('state: bad order');
-  const globalBypass = r.u8() !== 0; r.u8();
+  const globalBypass = r.u8() !== 0; const syncOn = r.u8() === 1;
   const fxCount = r.u8();
   if (fxCount === 0) throw new ProtocolError('state: fx_count 0');
   const inGainCdB = r.i16(), master = u162n(r.u16()), bpm10 = r.u16();
@@ -310,7 +312,7 @@ function decodeState(r) {
     params.push(per);
   }
   const uiMode = r.u8(), editSlot = r.u8();
-  return { type: T.STATE, fxId, bypass, order, globalBypass, fxCount, inGainCdB, master, bpm10, wet, params, uiMode, editSlot };
+  return { type: T.STATE, fxId, bypass, order, globalBypass, syncOn, fxCount, inGainCdB, master, bpm10, wet, params, uiMode, editSlot };
 }
 
 /** Build a ready-to-send frame for a message object. */
