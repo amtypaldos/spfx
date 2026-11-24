@@ -120,7 +120,7 @@ const small = [
   ['ev_bypass', { type: T.EVENT, setter: { type: T.SET_BYPASS, slot: 2, on: false } }, 0],
   ['ev_slot_fx', { type: T.EVENT, setter: { type: T.SET_SLOT_FX, slot: 0, fx: 2 } }, 0],
   ['ev_global', { type: T.EVENT, setter: { type: T.SET_GLOBAL_BYPASS, on: true } }, 0],
-  ['ev_master', { type: T.EVENT, setter: { type: T.SET_MASTER, v: 0.8125 } }, 0],
+  ['ev_master', { type: T.EVENT, setter: { type: T.SET_MASTER, v: 23 / 30 } }, 0], // VOL+ from 0.75: 2 dB grid (controls/volume.h)
   ['admission', { type: T.ADMISSION_ERROR, slot: 3, fx: 4, code: 2 }, 0],
   ['meters', { type: T.METERS, inPeak: 16384, outPeak: 40000, cpuPct: 47, cpuPeakPct: 88, memUsed: 120000, inClips: 3,
     outClips: 70000, underruns: 1, overruns: 2, nanEvents: 5, uiMode: 1, editSlot: 2, globalBypass: true }, 0],

@@ -140,13 +140,96 @@ static void test_volume_steps_and_repeat(void)
 	setup(850);
 	engine_set_master(&eng, 0.5f);
 	hold(B(BTN_VOLUP), 40); hold(0, 40);
-	CHECK_NEAR(eng.cfg.master, 0.5 + 1.0 / 16, 1e-4);
+	CHECK_NEAR(eng.cfg.master, 0.5 + 1.0 / VOL_STEPS, 1e-4);
+	CHECK_NEAR(vol_master_db(eng.cfg.master) - vol_master_db(0.5f), VOL_DB_PER_STEP, 1e-3); /* 2 dB */
 	hold(B(BTN_VOLDN), 40); hold(0, 40);
 	CHECK_NEAR(eng.cfg.master, 0.5, 1e-4);
-	hold(B(BTN_VOLUP), 3000); hold(0, 40);
-	CHECK_NEAR(eng.cfg.master, 1.0, 1e-4); /* clamps */
+	/* the stock default 0.75 (-15 dB) is between grid points: +1 goes to -14 dB, -1 to -16 dB */
+	engine_set_master(&eng, 0.75f);
+	hold(B(BTN_VOLUP), 40); hold(0, 40);
+	CHECK_NEAR(vol_master_db(eng.cfg.master), -14.0, 1e-3);
+	engine_set_master(&eng, 0.75f);
+	hold(B(BTN_VOLDN), 40); hold(0, 40);
+	CHECK_NEAR(vol_master_db(eng.cfg.master), -16.0, 1e-3);
+	/* holding repeats: full range up in ~3 s */
+	engine_set_master(&eng, 0.0f);
+	hold(B(BTN_VOLUP), GESTURE_VOL_DELAY_MS + GESTURE_VOL_REPEAT_MS * (VOL_STEPS - 1) + 40); hold(0, 40);
+	CHECK_NEAR(eng.cfg.master, 1.0, 1e-4); /* reached the top ... */
+	hold(B(BTN_VOLUP), 1000); hold(0, 40);
+	CHECK_NEAR(eng.cfg.master, 1.0, 1e-4); /* ... and clamps */
 	hold(B(BTN_VOLDN), 6000); hold(0, 40);
 	CHECK_NEAR(eng.cfg.master, 0.0, 1e-4);
+	/* every press emits one CTL_EV_MASTER with the new value */
+	ctl_event_t ev;
+	while (controller_pop_event(&ui, &ev)) {}
+	hold(B(BTN_VOLUP), 40); hold(0, 40);
+	int n = 0;
+	while (controller_pop_event(&ui, &ev)) if (ev.kind == CTL_EV_MASTER) { n++; CHECK_NEAR(ev.v, eng.cfg.master, 1e-6); }
+	CHECK(n == 1);
+}
+
+static void test_volume_mapping(void)
+{
+	/* grid, clamps, NaN */
+	CHECK_NEAR(vol_step(0.0f, -1), 0.0, 1e-6);
+	CHECK_NEAR(vol_step(1.0f, +1), 1.0, 1e-6);
+	CHECK_NEAR(vol_step(NAN, +1), 1.0 / VOL_STEPS, 1e-6);
+	for (int k = 0; k <= VOL_STEPS; k++) {
+		float m = (float)k / VOL_STEPS;
+		if (k < VOL_STEPS) CHECK_NEAR(vol_step(m, +1), (float)(k + 1) / VOL_STEPS, 1e-6);
+		if (k > 0) CHECK_NEAR(vol_step(m, -1), (float)(k - 1) / VOL_STEPS, 1e-6);
+		CHECK_NEAR(vol_step(m, 0), m, 1e-6);
+	}
+	/* dB mapping: -60..0 dB engine, mute at the bottom; codec input = engine + trim */
+	CHECK_NEAR(vol_master_db(1.0f), 0.0, 1e-4);
+	CHECK_NEAR(vol_master_db(0.5f), -30.0, 1e-4);
+	CHECK_NEAR(vol_master_db(0.75f), -15.0, 1e-4);
+	CHECK(vol_master_db(0.0f) <= -200.0f);
+	CHECK_NEAR(vol_out_dbfs(1.0f, -6.0f), -6.0, 1e-4);   /* loudest setting: -6 dBFS ceiling */
+	CHECK(vol_out_dbfs(0.0f, -6.0f) <= -200.0f);
+	/* matches the engine's actual gain: steady output of a 0.25 input at master m */
+	for (int k = 6; k <= VOL_STEPS; k += 6) {
+		float m = (float)k / VOL_STEPS;
+		engine_t e2;
+		static uint8_t p2[1024];
+		engine_init(&e2, p2, sizeof p2, SR, 850);
+		engine_config_t c;
+		engine_config_default(&c);
+		for (int s = 0; s < 4; s++) c.fx_id[s] = FX_NONE;
+		c.master = m;
+		engine_post_config(&e2, &c);
+		float l[64], r[64];
+		for (int b = 0; b < 400; b++) {
+			for (int i = 0; i < 64; i++) l[i] = r[i] = 0.25f;
+			engine_process(&e2, l, r, l, r, 64);
+		}
+		CHECK_NEAR(20.0 * log10(l[63] / 0.25), vol_master_db(m), 0.05);
+	}
+}
+
+static void test_volume_led_bar(void)
+{
+	setup(850);
+	led_frame_t f;
+	engine_set_master(&eng, 0.5f);
+	hold(B(BTN_VOLUP), 40); hold(0, 40); /* 0.5333: two LEDs full, the third a little lit */
+	controller_leds(&ui, T, &f);
+	CHECK(f.play[0] == 255 && f.play[1] == 255 && f.play[2] > 0 && f.play[2] < 255 && f.play[3] == 0);
+	/* gone after VOL_SHOW_MS */
+	hold(0, VOL_SHOW_MS + 16);
+	controller_leds(&ui, T, &f);
+	CHECK(!(f.play[0] == 255 && f.play[1] == 255 && f.play[2] > 0 && f.play[2] < 255));
+	/* mute: only LED 1 blinks dim */
+	engine_set_master(&eng, 1.0f / VOL_STEPS);
+	hold(B(BTN_VOLDN), 40); hold(0, 16);
+	CHECK(eng.cfg.master == 0.0f);
+	int seen_on = 0, others = 0;
+	for (int t = 0; t < 600; t += 8) {
+		controller_leds(&ui, T + (uint32_t)t, &f);
+		if (f.play[0]) seen_on = 1;
+		if (f.play[1] || f.play[2] || f.play[3]) others = 1;
+	}
+	CHECK(seen_on && !others);
 }
 
 static void test_edit_mode_and_takeover(void)
@@ -408,6 +491,38 @@ static int same_fx(const store_data_t *d)
 	return 1;
 }
 
+static void test_preset_keeps_volume_and_single_clean(void)
+{
+	/* the device preset list is exactly the factory table: one Clean (the usbaudio bring-up
+	 * image had an extra "Clean" at index 0 in front of the table, so it appeared twice) */
+	int cleans = 0;
+	for (int k = 0; k < FACTORY_PRESET_COUNT; k++) cleans += strcmp(factory_presets[k].name, "Clean") == 0;
+	CHECK(cleans == 1);
+	for (int a = 0; a < FACTORY_PRESET_COUNT; a++)
+		for (int b = a + 1; b < FACTORY_PRESET_COUNT; b++) CHECK(strcmp(factory_presets[a].name, factory_presets[b].name) != 0);
+	/* cycling through the whole list once visits every preset once, Clean included */
+	setup_presets();
+	int seen[FACTORY_PRESET_COUNT] = {0};
+	for (int k = 0; k < FACTORY_PRESET_COUNT; k++) {
+		hold(B(BTN_FN), 40); hold(B(BTN_FN) | B(BTN_FWD), 24); hold(B(BTN_FN), 80); hold(0, 40);
+		CHECK(ui.preset_idx >= 0 && ui.preset_idx < FACTORY_PRESET_COUNT);
+		if (ui.preset_idx >= 0 && ui.preset_idx < FACTORY_PRESET_COUNT) seen[ui.preset_idx]++;
+	}
+	for (int k = 0; k < FACTORY_PRESET_COUNT; k++) CHECK(seen[k] == 1);
+	/* with preset_keep_master (zephyr_sp1fx) a preset load keeps the owner's volume */
+	setup_presets();
+	ui.preset_keep_master = 1;
+	engine_set_master(&eng, 0.9f);
+	hold(B(BTN_FN), 40); hold(B(BTN_FN) | B(BTN_FWD), 24); hold(B(BTN_FN), 80); hold(0, 40);
+	CHECK(ui.preset_idx == 0);
+	CHECK_NEAR(eng.cfg.master, 0.9, 1e-6);
+	/* without it the preset's own master applies (companion-style full recall) */
+	setup_presets();
+	engine_set_master(&eng, 0.9f);
+	hold(B(BTN_FN), 40); hold(B(BTN_FN) | B(BTN_FWD), 24); hold(B(BTN_FN), 80); hold(0, 40);
+	CHECK_NEAR(eng.cfg.master, factory_presets[0].master, 1e-6);
+}
+
 static void test_preset_cycle_gesture(void)
 {
 	setup_presets();
@@ -597,6 +712,8 @@ int main(void)
 	RUN(test_channel_chord_does_nothing);
 	RUN(test_play_global_bypass);
 	RUN(test_volume_steps_and_repeat);
+	RUN(test_volume_mapping);
+	RUN(test_volume_led_bar);
 	RUN(test_edit_mode_and_takeover);
 	RUN(test_takeover_unit);
 	RUN(test_faders_set_wet_after_pickup);
@@ -606,6 +723,7 @@ int main(void)
 	RUN(test_led_select_and_edit);
 	RUN(test_sync_out);
 	RUN(test_preset_cycle_gesture);
+	RUN(test_preset_keeps_volume_and_single_clean);
 	RUN(test_preset_rapid_presses_coalesce);
 	RUN(test_preset_leaves_edit_mode_and_does_not_jump_faders);
 	RUN(test_preset_fade_is_silent_and_recovers);

@@ -656,10 +656,10 @@ static void test_device_events(void)
 	clear_tx();
 	hold(B(BTN_PLAY), 80); hold(0, 40);
 	CHECK(raw_equals(last_of(PT_EVENT), g_ev_global, sizeof g_ev_global));
-	/* master volume up: 0.75 -> 0.8125 (JS golden SET_MASTER v 0.8125) */
+	/* master volume up: 0.75 -> 23/30 (2 dB grid, controls/volume.h; JS golden SET_MASTER v 23/30) */
 	clear_tx();
 	hold(B(BTN_VOLUP), 40); hold(0, 40);
-	CHECK_NEAR(eng.cfg.master, 0.8125, 1e-6);
+	CHECK_NEAR(eng.cfg.master, 23.0 / 30.0, 1e-6);
 	CHECK(raw_equals(last_of(PT_EVENT), g_ev_master, sizeof g_ev_master));
 	/* effect cycle on slot 0: filter -> chorus = JS golden SET_SLOT_FX slot 0 fx 2 */
 	clear_tx();

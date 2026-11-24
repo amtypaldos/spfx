@@ -136,11 +136,9 @@ static void handle(controller_t *c, const gesture_event_t *ev, uint32_t now)
 		push_ev(c, CTL_EV_GLOBAL_BYPASS, 0, e->cfg.global_bypass, 0, 0.0f);
 		break;
 	case GE_VOL: {
-		float step = 1.0f / MASTER_STEPS;
-		float v = e->cfg.master + step * (float)ev->arg;
-		/* snap to the step grid so repeated presses are exact */
-		v = roundf(v * MASTER_STEPS) / MASTER_STEPS;
-		engine_set_master(e, v);
+		/* one 2 dB step on the volume grid (controls/volume.h); repeats while held */
+		engine_set_master(e, vol_step(e->cfg.master, ev->arg));
+		c->vol_until = now + VOL_SHOW_MS;
 		changed(c, now);
 		push_ev(c, CTL_EV_MASTER, 0, 0, 0, e->cfg.master);
 		break;
@@ -170,6 +168,7 @@ void controller_tick(controller_t *c, uint32_t now, uint16_t buttons, const floa
 		int idx = c->preset_pending;
 		c->preset_pending = -1;
 		if (c->preset_fill && c->preset_fill(c->preset_ctx, idx, &d) == 0) {
+			if (c->preset_keep_master) d.cfg.master = c->eng->cfg.master;
 			int rejected = engine_apply_config(c->eng, &d.cfg);
 			c->mode = UI_PERFORM;
 			c->preset_idx = idx;
@@ -230,7 +229,7 @@ static uint8_t level_led(float level, int need, uint32_t now)
 	return ph < 100u ? 0 : clamp8(base < 110.0f ? 110.0f : base);
 }
 
-void controller_leds(const controller_t *c, uint32_t now, led_frame_t *o)
+static void leds_base(const controller_t *c, uint32_t now, led_frame_t *o)
 {
 	const engine_config_t *cfg = &c->eng->cfg;
 	memset(o, 0, sizeof *o);
@@ -306,4 +305,29 @@ void controller_leds(const controller_t *c, uint32_t now, led_frame_t *o)
 		for (int i = 0; i < 4; i++) o->play[i] = pk > th[i] ? 120 : 0;
 		if (pk > 0.98f) for (int i = 0; i < 4; i++) o->play[i] = 255;
 	}
+}
+
+/* Volume bar on the four PLAY-side LEDs: each LED is a quarter of the master range (fully lit,
+ * partly lit = dimmer, dark); master 0 (mute) = one dim LED blinking. A position cue, no numbers. */
+static void vol_bar(float m, uint32_t now, uint8_t play[4])
+{
+	if (!(m >= VOL_MUTE_BELOW)) {
+		for (int i = 0; i < 4; i++) play[i] = 0;
+		play[0] = ((now / 150u) & 1u) ? 40 : 0;
+		return;
+	}
+	for (int i = 0; i < 4; i++) {
+		float part = m * 4.0f - (float)i; /* 0..1 for this LED */
+		if (part >= 1.0f) play[i] = 255;
+		else if (part > 0.0f) play[i] = clamp8(30.0f + 225.0f * part);
+		else play[i] = 0;
+	}
+}
+
+void controller_leds(const controller_t *c, uint32_t now, led_frame_t *o)
+{
+	leds_base(c, now, o);
+	int showing_select = c->held_slot >= 0 && (c->selecting || now - c->held_since > 250u) && c->mode == UI_PERFORM;
+	if (c->vol_until != 0u && (int32_t)(c->vol_until - now) > 0 && !showing_select && now >= c->err_until)
+		vol_bar(c->eng->cfg.master, now, o->play);
 }

@@ -4,6 +4,7 @@
 #define SP1FX_CONTROLLER_H
 
 #include "controls.h"
+#include "volume.h"
 #include "../dsp/engine.h"
 #include "../storage/config_store.h"
 
@@ -51,6 +52,7 @@ typedef struct {
 	uint32_t err_until;  /* admission-error LED pattern end time */
 	uint32_t flash_until;/* effect-change confirmation flash */
 	int last_master_step;
+	uint32_t vol_until;  /* VOL+/VOL- pressed: show the volume bar on the PLAY-side LEDs until then */
 
 	int power_off_request;
 	uint32_t change_seq; /* increments on any user-visible state change (companion / persistence) */
@@ -64,6 +66,8 @@ typedef struct {
 	int preset_pending;    /* target while the fade-out runs, -1 none */
 	uint32_t preset_apply_at, preset_flash_until, preset_bar_until;
 	float preset_bpm;      /* tempo of the last loaded preset (the app forwards it to sync/protocol) */
+	int preset_keep_master; /* 1: loading a preset keeps the current master volume (VOL+/-
+	                         * is a device setting, not part of a preset); 0: preset's value */
 
 	ctl_event_t ev[CTL_EVENT_CAP];
 	uint8_t ev_head, ev_count;
@@ -84,6 +88,8 @@ void controller_set_presets(controller_t *c, int count, int (*fill)(void *ctx, i
 int controller_pop_event(controller_t *c, ctl_event_t *out);
 void controller_leds(const controller_t *c, uint32_t now_ms, led_frame_t *out);
 
-#define MASTER_STEPS 16
+/* VOL+/VOL-: 2 dB per press on the engine's -60..0 dB master taper (controls/volume.h). */
+#define MASTER_STEPS VOL_STEPS
+#define VOL_SHOW_MS 1200u
 
 #endif
