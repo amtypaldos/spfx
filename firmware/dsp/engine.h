@@ -88,6 +88,7 @@ typedef struct {
 	uint32_t overload_sheds;       /* slots switched off by the guard (total) */
 	uint32_t overload_forced;      /* times the guard forced global bypass */
 	uint32_t overload_recovers;    /* shed slots / forced bypass switched back on after calm */
+	uint32_t overload_starve_sheds; /* sheds requested by the app (control thread starved) */
 	uint8_t shed_mask;             /* bit s = slot s is switched off by the guard now */
 	uint8_t forced_bypass;         /* 1 = guard forced global bypass now */
 } engine_diag_t;
@@ -247,6 +248,10 @@ int engine_overload_feed(engine_t *e, uint32_t cycles, uint32_t limit);
 /* Audio: this block is not representative (e.g. the CPU was stalled by a flash write): leave
  * it out of the guard window. */
 void engine_overload_skip(engine_t *e);
+/* Audio: shed one slot now (the app saw the control thread starved with no idle CPU left).
+ * Same choice as the guard (most expensive running slot, then forced bypass); recovery
+ * applies as usual. Returns 1 if it acted. */
+int engine_overload_shed_now(engine_t *e);
 /* Control: undo the guard's actions (taken at the audio thread's next chunk). */
 void engine_overload_clear(engine_t *e);
 

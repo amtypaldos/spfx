@@ -235,6 +235,18 @@ static void test_overload_guard(void)
 	CHECK(eng.diag.shed_mask != 0);
 	CHECK(feed_n(W * 39u, LIM / 2u, LIM) == 0 && eng.diag.shed_mask != 0);
 	CHECK(feed_n(W, LIM / 2u, LIM) == 2 && eng.diag.shed_mask == 0);
+	/* starvation request from the app: sheds at once (most expensive first), counted,
+	 * and recovers like a guard shed */
+	setup_three();
+	eng.overload_recover_win = 10u;
+	CHECK(engine_overload_shed_now(&eng) == 1);
+	CHECK(eng.diag.shed_mask == 2u && eng.diag.overload_starve_sheds == 1);
+	run_blocks(2, 0.3f);
+	CHECK(feed_n(W * 10u, LIM / 2u, LIM) == 2 && eng.diag.shed_mask == 0);
+	/* disabled guard: no starvation sheds either */
+	setup_three();
+	eng.overload_n = 0;
+	CHECK(engine_overload_shed_now(&eng) == 0 && eng.diag.shed_mask == 0);
 	/* skipped blocks (flash stall) are not in the window */
 	setup_three();
 	uint32_t c0 = eng.ov_cnt;

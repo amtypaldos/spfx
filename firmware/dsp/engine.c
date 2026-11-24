@@ -493,6 +493,35 @@ void engine_overload_skip(engine_t *e)
 	e->chunk_inits = 0;
 }
 
+/* switch off the most expensive running slot, or force bypass when none is left; 1 if acted */
+static int shed_one(engine_t *e)
+{
+	/* the most expensive slot that still runs (declared cost; later in the chain on a tie) */
+	int best = -1;
+	uint32_t best_c = 0;
+	for (int k = 0; k < ENGINE_SLOTS; k++) {
+		int s = e->run.order[k];
+		const fx_desc *d = fx_get(e->live_id[s]);
+		if (!d || e->live_id[s] == FX_NONE || e->shed[s] || !e->active[s]) continue;
+		if (best < 0 || d->cpu_cycles >= best_c) { best = s; best_c = d->cpu_cycles; }
+	}
+	if (best >= 0) {
+		e->shed[best] = 1;        /* fades out in the next chunk, then stops */
+		if (e->shed_times[best] < 255) e->shed_times[best]++;
+		e->diag.shed_mask |= (uint8_t)(1u << best);
+		e->diag.overload_sheds++;
+		return 1;
+	}
+	if (!e->forced_bypass) {
+		e->forced_bypass = 1;
+		if (e->forced_times < 255) e->forced_times++;
+		e->diag.forced_bypass = 1;
+		e->diag.overload_forced++;
+		return 1;
+	}
+	return 0;
+}
+
 int engine_overload_feed(engine_t *e, uint32_t cycles, uint32_t limit)
 {
 	int inits = e->chunk_inits;
@@ -530,30 +559,18 @@ int engine_overload_feed(engine_t *e, uint32_t cycles, uint32_t limit)
 	e->over_run = 0;
 	e->hard_run = 0;
 
-	/* the most expensive slot that still runs (declared cost; later in the chain on a tie) */
-	int best = -1;
-	uint32_t best_c = 0;
-	for (int k = 0; k < ENGINE_SLOTS; k++) {
-		int s = e->run.order[k];
-		const fx_desc *d = fx_get(e->live_id[s]);
-		if (!d || e->live_id[s] == FX_NONE || e->shed[s] || !e->active[s]) continue;
-		if (best < 0 || d->cpu_cycles >= best_c) { best = s; best_c = d->cpu_cycles; }
-	}
-	if (best >= 0) {
-		e->shed[best] = 1;        /* fades out in the next chunk, then stops */
-		if (e->shed_times[best] < 255) e->shed_times[best]++;
-		e->diag.shed_mask |= (uint8_t)(1u << best);
-		e->diag.overload_sheds++;
-		return 1;
-	}
-	if (!e->forced_bypass) {
-		e->forced_bypass = 1;
-		if (e->forced_times < 255) e->forced_times++;
-		e->diag.forced_bypass = 1;
-		e->diag.overload_forced++;
-		return 1;
-	}
-	return 0;
+	return shed_one(e);
+}
+
+int engine_overload_shed_now(engine_t *e)
+{
+	if (e->overload_n == 0) return 0;
+	e->over_run = 0;
+	e->hard_run = 0;
+	e->calm_run = 0;
+	int r = shed_one(e);
+	if (r) e->diag.overload_starve_sheds++;
+	return r;
 }
 
 void engine_pump(engine_t *e)
