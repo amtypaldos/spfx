@@ -38,3 +38,8 @@ Entries below are research references, pinned to the commit inspected.
 | bnjreece/awesome-te | `02c9fb3c95b7fa4bae954be4d7ae795396d10e93` | see repo | Link index |
 
 Not reviewed: solderless.engineering terms, ericlewis/sp1-midi, reverbose.com page.
+
+## Bring-up apps added later (details in each app's NOTICES.md)
+
+- `firmware/app/zephyr_controls/NOTICES.md`: ladder/fader thresholds and LED/rail handling adapted from chattock/sp1-tape-looper `0359372e` (MIT).
+- `firmware/app/zephyr_sync/NOTICES.md`: MIDI/PO sync bit-banging approach adapted from chattock/sp1-tape-looper `0359372e` (MIT).

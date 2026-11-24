@@ -1,0 +1,19 @@
+# SP-1 FX controls bring-up image Kconfig.
+#
+# Pulls in Zephyr's USB sample options (CONFIG_SAMPLE_USBD_*) consumed by
+# samples/subsys/usb/common/sample_usbd_init.c (as Tape Looper and
+# zephyr_tone do), then the standard Zephyr Kconfig tree.
+
+source "samples/subsys/usb/common/Kconfig.sample_usbd"
+
+config SP1FX_USB_CONSOLE
+	bool "USB CDC ACM status console (10 Hz status + one line per event)"
+	default y
+	depends on USB_DEVICE_STACK_NEXT && USBD_CDC_ACM_CLASS && UART_INTERRUPT_DRIVEN
+	help
+	  Brings up the board's cdc_acm_uart0 on the device_next USB stack and
+	  prints raw ADC values, the decoded buttons and every gesture. Output
+	  is non-blocking: lines are dropped when the host is not reading.
+	  Build with no_usb.conf (build_controls.sh --no-usb) to leave USB off.
+
+source "Kconfig.zephyr"

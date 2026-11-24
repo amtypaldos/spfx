@@ -1,0 +1,69 @@
+/*
+ * SP-1 FX controls bring-up overlay on the stem_player board (firmware/boards).
+ *
+ * Enabled: SAADC (two button ladders from the board + four faders added
+ * here), usbd with the board's cdc_acm_uart0 (status console).
+ * Disabled: UAC2 speaker function, I2S, I2C (no audio in this image).
+ *
+ * Fader channels 2-5 follow chattock/sp1-tape-looper @0359372e (MIT)
+ * tools/capacity422/runtime/app.overlay: same gain 1/6, internal 0.6 V
+ * reference, 20 us acquisition, 12-bit as the board's ladder channels 0-1
+ * (Tape Looper's raw thresholds are only valid under this setup). Its
+ * battery channel (6, AIN4) is not used here.
+ *
+ * Pins (source: Tape Looper main.c, SP-1-dev wiki SAADC/Hardware-overview):
+ *   ladder 1 P0.02/AIN0, ladder 2 P0.03/AIN1 (board channels 0, 1)
+ *   faders 1..4 = P0.05/AIN3, P0.30/AIN6, P0.04/AIN2, P0.31/AIN7
+ *   BTN_COM rail = P1.10, active-high (ladders + faders powered from it)
+ *   FUNCTION     = P0.27, active-low with internal pull-up
+ *   LEDs are driven at register level by firmware/drivers/controls_hw.c
+ *   (PWM0/PWM1), so no PWM/LED nodes here.
+ */
+
+#include <zephyr/dt-bindings/adc/adc.h>
+#include <zephyr/dt-bindings/adc/nrf-saadc.h>
+
+&adc {
+	channel@2 {
+		reg = <2>;
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 20)>;
+		zephyr,input-positive = <NRF_SAADC_AIN3>;   /* fader 1, P0.05 */
+		zephyr,resolution = <12>;
+	};
+	channel@3 {
+		reg = <3>;
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 20)>;
+		zephyr,input-positive = <NRF_SAADC_AIN6>;   /* fader 2, P0.30 */
+		zephyr,resolution = <12>;
+	};
+	channel@4 {
+		reg = <4>;
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 20)>;
+		zephyr,input-positive = <NRF_SAADC_AIN2>;   /* fader 3, P0.04 */
+		zephyr,resolution = <12>;
+	};
+	channel@5 {
+		reg = <5>;
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 20)>;
+		zephyr,input-positive = <NRF_SAADC_AIN7>;   /* fader 4, P0.31 */
+		zephyr,resolution = <12>;
+	};
+};
+
+&zephyr_user {
+	io-channels = <&adc 0>, <&adc 1>, <&adc 2>, <&adc 3>, <&adc 4>, <&adc 5>;
+	fn-gpios = <&gpio0 27 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+	btn-com-gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>;
+};
+
+&uac2_speaker { status = "disabled"; };
+&i2s0 { status = "disabled"; };
+&i2c0 { status = "disabled"; };

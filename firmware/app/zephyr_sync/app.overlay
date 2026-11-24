@@ -1,0 +1,26 @@
+/*
+ * SP-1 FX sync-jack bring-up overlay on the stem_player board.
+ *
+ * Enabled: usbd with the board's cdc_acm_uart0 (status console).
+ * Disabled: UAC2 speaker, I2S, I2C, SAADC (bootloader-owned / unused).
+ * The SYNC jack pins (P0.23 ring via PNP, P0.20 + P0.17 tip) are driven by
+ * firmware/drivers/sync_hw.c with direct register access; no DT node.
+ *
+ * Pins (source: chattock/sp1-tape-looper tools/capacity422/runtime/src/main.c
+ * @0359372e, MIT):
+ *   track LEDs 1..4 = P0.29, P0.26, P1.15, P1.14, active-high
+ *   FUNCTION        = P0.27, active-low with internal pull-up
+ */
+
+&zephyr_user {
+	led1-gpios = <&gpio0 29 GPIO_ACTIVE_HIGH>;
+	led2-gpios = <&gpio0 26 GPIO_ACTIVE_HIGH>;
+	led3-gpios = <&gpio1 15 GPIO_ACTIVE_HIGH>;
+	led4-gpios = <&gpio1 14 GPIO_ACTIVE_HIGH>;
+	fn-gpios   = <&gpio0 27 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+};
+
+&uac2_speaker { status = "disabled"; };
+&i2s0 { status = "disabled"; };
+&i2c0 { status = "disabled"; };
+&adc  { status = "disabled"; };

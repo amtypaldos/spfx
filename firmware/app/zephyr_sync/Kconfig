@@ -1,0 +1,49 @@
+# SP-1 FX sync-jack bring-up image Kconfig. NOT TESTED ON HARDWARE.
+
+source "samples/subsys/usb/common/Kconfig.sample_usbd"
+
+config SP1FX_USB_CONSOLE
+	bool "USB CDC ACM status console (one line per second)"
+	default y
+	depends on USB_DEVICE_STACK_NEXT && USBD_CDC_ACM_CLASS && UART_INTERRUPT_DRIVEN
+	help
+	  Brings up the board's cdc_acm_uart0 and prints a status line every
+	  second. Non-blocking: lines are dropped when the host is not reading.
+	  build_sync.sh --no-usb adds no_usb.conf to leave USB off.
+
+config SP1FX_SYNC_BPM
+	int "Fixed tempo in BPM"
+	default 120
+	range 30 300
+
+config SP1FX_SYNC_MIDI_INVERT
+	bool "Invert the MIDI waveform at the GPIO (compensate the PNP stage)"
+	default y
+	help
+	  Tape Looper's MIDI_INVERT = 1: P0.23 LOW -> ring HIGH (idle/mark).
+	  UNVERIFIED on real gear. If a receiver sees nothing or garbage,
+	  rebuild with this off.
+
+config SP1FX_SYNC_SWAP_TIP_RING
+	bool "Swap roles: MIDI on the tip pins, PO pulses on the ring pin"
+	default n
+	help
+	  Default (n): MIDI on P0.23 (ring, via PNP), PO on P0.20+P0.17 (tip).
+	  y: the MIDI bit stream goes to P0.20+P0.17 and the PO pulse to P0.23.
+	  Pins are driven the same way either way (push-pull GPIO levels);
+	  only which signal goes where changes.
+
+config SP1FX_SYNC_PO_ACTIVE_LOW
+	bool "PO pulse is active-low at the pin"
+	default n
+	help
+	  Default (n): PO pins idle low and pulse high (Tape Looper drives
+	  them low at init). The ring pin goes through an inverting PNP, so
+	  with SWAP_TIP_RING=y you may want this on.
+
+config SP1FX_SYNC_PO_PULSE_MS
+	int "PO sync pulse width (ms)"
+	default 5
+	range 1 20
+
+source "Kconfig.zephyr"
