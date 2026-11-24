@@ -884,7 +884,7 @@ static void apply_out(enum out o)
  * Going to line out first lowers the master so the level at the jack does not jump up. */
 static void set_out_mode(uint8_t mode)
 {
-	mode = mode == OUT_MODE_LINE ? OUT_MODE_LINE : OUT_MODE_HP;
+	mode = mode < OUT_MODE_COUNT ? mode : OUT_MODE_HP;
 	if (mode == g_out_mode) {
 		return;
 	}
@@ -1876,7 +1876,7 @@ static void log_diag_step(uint32_t now)
 			   pct10(eng.diag.ovl_last_mean) / 10, pct10(eng.diag.ovl_last_mean) % 10,
 			   pct10(ovl_period_max) / 10, pct10(ovl_period_max) % 10,
 			   eng.diag.shed_mask, eng.diag.forced_bypass, idb(vol_master_db(eng.cfg.master)),
-			   g_out_mode == OUT_MODE_LINE ? "LINE" : "hp");
+			   g_out_mode == OUT_MODE_LINE ? "LINE" : g_out_mode == OUT_MODE_LOUD ? "LOUD" : "hp");
 		ovl_period_max = 0;
 		break;
 	case 1: {
@@ -1972,7 +1972,8 @@ static void log_diag_step(uint32_t now)
 			   (unsigned int)ssched.deferred, sev.dirty, ssched.pending, (unsigned int)st_dedup,
 			   safe_boot ? 1 : 0, (unsigned int)st_events, (unsigned int)st_tweaks,
 			   (unsigned int)sev.deferred_load, (unsigned int)st_job_ms_max,
-			   g_out_mode == OUT_MODE_LINE ? "LINE" : "hp", (unsigned int)g_ctl_ticks, (unsigned int)g_ctl_scans,
+			   g_out_mode == OUT_MODE_LINE ? "LINE" : g_out_mode == OUT_MODE_LOUD ? "LOUD" : "hp",
+		   (unsigned int)g_ctl_ticks, (unsigned int)g_ctl_scans,
 			   (unsigned int)sst.age_ms, (unsigned int)sst.timeouts, (unsigned int)sst.start_fail,
 			   (unsigned int)sst.stop_fail, (unsigned int)sst.ppi_cleared,
 			   (unsigned int)sst.was_enabled, (int)g_batt_raw, proto.sync_on,
@@ -2056,8 +2057,8 @@ int main(void)
 	} else {
 		store_data_default(&boot_d);   /* safe boot: factory defaults, journal untouched */
 	}
-	g_out_mode = (IS_ENABLED(CONFIG_SP1FX_LINEOUT_RESTORE) && boot_d.out_mode == OUT_MODE_LINE) ?
-		     OUT_MODE_LINE : OUT_MODE_HP;
+	g_out_mode = (IS_ENABLED(CONFIG_SP1FX_LINEOUT_RESTORE) && boot_d.out_mode < OUT_MODE_COUNT) ?
+		     boot_d.out_mode : OUT_MODE_HP;   /* rc5 default: always Headphones at start */
 	boot_d.out_mode = g_out_mode;
 	/* the loaded state counts as saved: no write at boot unless something really changes */
 	st_last_len = store_encode(&boot_d, st_last_rec, sizeof(st_last_rec));
@@ -2349,6 +2350,13 @@ int main(void)
 						hp_cnt = 1;
 					}
 					if (hp_cnt >= 2) {
+						/* rc5: something plugged into the jack while Loud / Line out:
+						 * back to Headphones first (refusal LED pattern) */
+						if (c == 1 && hp_in == 0 && g_out_mode != OUT_MODE_HP) {
+							set_out_mode(OUT_MODE_HP);
+							ui.err_until = now + 700u;
+							EV_PRINTF("C %u jack plugged: level back to Headphones\r\n", now);
+						}
 						hp_in = c;
 					}
 				}
