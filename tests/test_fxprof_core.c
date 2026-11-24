@@ -151,11 +151,12 @@ static void test_overload_guard(void)
 	CHECK(eng.shed[1] == 2 && eng.active[1] == 1);
 	run_blocks(1, 0.3f);
 	CHECK(eng.active[1] == 0); /* stopped and reset, no tail */
-	/* safety net: a window whose mean is over 9/8 of the limit acts after ONE window */
+	/* safety net: windows whose mean is over 9/8 of the limit act after TWO windows (rc3:
+	 * one 114 % window on hardware shed three slots) */
 	uint32_t order[3] = {0, 0, 0};
 	for (int step = 0; step < 3; step++) {
 		uint8_t before = eng.diag.shed_mask;
-		CHECK(feed_n(W - 1u, LIM * 2u, LIM) == 0);
+		CHECK(feed_n(2u * W - 1u, LIM * 2u, LIM) == 0);
 		CHECK(engine_overload_feed(&eng, LIM * 2u, LIM) == 1);
 		run_blocks(2, 0.3f);
 		order[step] = eng.diag.shed_mask & ~before;
@@ -192,13 +193,53 @@ static void test_overload_guard(void)
 		engine_overload_feed(&eng, 0, LIM);
 	}
 	CHECK(eng.diag.shed_mask == 0);
+	/* one bad window then a normal one: nothing (the rc2 hardware case: 114 % once) */
+	setup_three();
+	CHECK(feed_n(W, LIM * 114u / 85u, LIM) == 0);
+	CHECK(feed_n(W, LIM / 2u, LIM) == 0);
+	CHECK(eng.diag.shed_mask == 0);
 	/* a new effect in a shed slot starts unshed */
 	setup_three();
-	feed_n(W, LIM * 2u, LIM);
+	feed_n(2u * W, LIM * 2u, LIM);
 	CHECK(eng.diag.shed_mask == 2u);
 	engine_assign(&eng, 1, FX_CHORUS);
 	run_blocks(2, 0.3f);
 	CHECK(eng.diag.shed_mask == 0 && eng.shed[1] == 0 && eng.active[1]);
+	/* auto-recovery: after ~10 s of calm windows one slot comes back (cheapest first);
+	 * shedding the same slot again doubles the wait */
+	setup_three();
+	eng.overload_recover_win = 10u;
+	feed_n(2u * W, LIM * 2u, LIM);          /* sheds slot 1 (reverb) */
+	feed_n(2u * W, LIM * 2u, LIM);          /* and the next */
+	run_blocks(2, 0.3f);
+	uint8_t m2 = eng.diag.shed_mask;
+	CHECK(__builtin_popcount(m2) == 2);
+	CHECK(feed_n(W * 9u, LIM / 2u, LIM) == 0);     /* 9 calm windows: not yet */
+	CHECK(engine_overload_feed(&eng, LIM / 2u, LIM) == 0 && feed_n(W - 1u, LIM / 2u, LIM) == 2); /* 10th */
+	CHECK(__builtin_popcount(eng.diag.shed_mask) == 1 && eng.diag.overload_recovers == 1);
+	run_blocks(2, 0.3f);
+	/* the remaining one after another 10 calm windows */
+	CHECK(feed_n(W * 10u, LIM / 2u, LIM) == 2);
+	CHECK(eng.diag.shed_mask == 0);
+	run_blocks(4, 0.3f);
+	CHECK(eng.active[0] && eng.active[1] && eng.active[2]);
+	/* not calm enough (80 %+ of the limit) never recovers */
+	feed_n(2u * W, LIM * 2u, LIM);
+	CHECK(eng.diag.shed_mask != 0);
+	CHECK(feed_n(W * 50u, LIM * 82u / 100u, LIM) == 0 && eng.diag.shed_mask != 0);
+	/* back-off: that was the reverb's 2nd shed -> 20 calm windows; a 3rd shed -> 40 */
+	CHECK(feed_n(W * 19u, LIM / 2u, LIM) == 0 && eng.diag.shed_mask != 0);
+	CHECK(feed_n(W, LIM / 2u, LIM) == 2 && eng.diag.shed_mask == 0);
+	run_blocks(2, 0.3f);
+	feed_n(2u * W, LIM * 2u, LIM);           /* same slot shed a third time */
+	CHECK(eng.diag.shed_mask != 0);
+	CHECK(feed_n(W * 39u, LIM / 2u, LIM) == 0 && eng.diag.shed_mask != 0);
+	CHECK(feed_n(W, LIM / 2u, LIM) == 2 && eng.diag.shed_mask == 0);
+	/* skipped blocks (flash stall) are not in the window */
+	setup_three();
+	uint32_t c0 = eng.ov_cnt;
+	engine_overload_skip(&eng);
+	CHECK(eng.ov_cnt == c0);
 	/* disabled guard */
 	setup_three();
 	eng.overload_n = 0;

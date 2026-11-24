@@ -87,6 +87,7 @@ typedef struct {
 	uint32_t ovl_max_mean;         /* highest window mean since boot */
 	uint32_t overload_sheds;       /* slots switched off by the guard (total) */
 	uint32_t overload_forced;      /* times the guard forced global bypass */
+	uint32_t overload_recovers;    /* shed slots / forced bypass switched back on after calm */
 	uint8_t shed_mask;             /* bit s = slot s is switched off by the guard now */
 	uint8_t forced_bypass;         /* 1 = guard forced global bypass now */
 } engine_diag_t;
@@ -148,6 +149,10 @@ struct engine_s {
 	uint32_t over_run;             /* consecutive guard windows whose mean was over the limit */
 	uint64_t ov_sum;               /* cycles summed in the current guard window */
 	uint32_t ov_cnt;               /* blocks in the current guard window */
+	uint32_t hard_run;             /* consecutive windows over the hard limit */
+	uint32_t calm_run;             /* consecutive windows under 80 % of the limit */
+	uint8_t shed_times[ENGINE_SLOTS]; /* how often each slot was shed (recovery back-off) */
+	uint8_t forced_times;
 	uint32_t shed_clear_ack;
 	float k_mix, k_in, k_gain, k_master, k_duck;
 	float duck_cur;
@@ -169,6 +174,11 @@ struct engine_s {
 	 * overload_n = 0 disables the guard. */
 	uint32_t overload_n;
 	uint32_t overload_win;
+	/* Auto-recovery: after this many consecutive calm windows (mean < 80 % of the limit) one
+	 * guard action is undone (forced bypass first, then the cheapest shed slot); the wait
+	 * doubles each time the same slot had to be shed again (max x16). 0 = never. engine_init
+	 * sets ENGINE_OVERLOAD_RECOVER_WINDOWS (~10 s). */
+	uint32_t overload_recover_win;
 
 	/* Tests only (NULL in firmware): called at the ENGINE_HOOK_* points. */
 	void (*hook)(engine_t *e, int point, void *ctx);
@@ -188,6 +198,8 @@ struct engine_s {
  * cannot trigger it unless they raise the window mean over the limit. */
 #define ENGINE_OVERLOAD_WIN_BLOCKS 32u
 #define ENGINE_OVERLOAD_WINDOWS 3u
+#define ENGINE_OVERLOAD_HARD_WINDOWS 2u      /* windows over limit * 9/8 in a row (85 ms) */
+#define ENGINE_OVERLOAD_RECOVER_WINDOWS 234u /* 234 x 42.7 ms = 10 s */
 
 void engine_config_default(engine_config_t *c);
 /* Repair a config of unknown provenance (corrupt flash, bad import). Returns number of fixes. */
@@ -225,12 +237,16 @@ void engine_process(engine_t *e, const float *in_l, const float *in_r, float *ou
  * block's work took and the limit (e.g. 85 % of the block period). The cycles are averaged
  * over windows of overload_win blocks (blocks that initialised an effect are left out). After
  * overload_n consecutive windows whose mean is over the limit (~128 ms with the defaults), or
- * one window whose mean is over limit * 9/8 (safety net: the audio thread cannot keep up), the
+ * ENGINE_OVERLOAD_HARD_WINDOWS windows in a row whose mean is over limit * 9/8 (safety net),
+ * the
  * guard fades out and switches off the live slot with the largest declared cpu_cycles
  * (diag.shed_mask); when no slot is left it forces global bypass (diag.forced_bypass). Returns
  * 1 when it acted on this call. The actions last until the slot gets a new effect, or
  * engine_overload_clear(). */
 int engine_overload_feed(engine_t *e, uint32_t cycles, uint32_t limit);
+/* Audio: this block is not representative (e.g. the CPU was stalled by a flash write): leave
+ * it out of the guard window. */
+void engine_overload_skip(engine_t *e);
 /* Control: undo the guard's actions (taken at the audio thread's next chunk). */
 void engine_overload_clear(engine_t *e);
 

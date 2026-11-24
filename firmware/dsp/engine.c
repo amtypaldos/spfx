@@ -93,6 +93,7 @@ void engine_init(engine_t *e, void *pool, uint32_t pool_bytes, float sr, uint32_
 	e->mg_cached = -1.0f;
 	e->overload_n = ENGINE_OVERLOAD_WINDOWS;
 	e->overload_win = ENGINE_OVERLOAD_WIN_BLOCKS;
+	e->overload_recover_win = ENGINE_OVERLOAD_RECOVER_WINDOWS;
 }
 
 static uint32_t fx_cycles(int fx_id)
@@ -402,6 +403,7 @@ static void init_slot(engine_t *e, int s)
 	for (int i = 0; i < FX_MAX_PARAMS; i++) e->pushed[s][i] = -1.0f; /* force push */
 	e->pend_id[s] = FX_NONE;
 	e->shed[s] = 0;              /* a new effect instance gets a fresh chance */
+	e->shed_times[s] = 0;
 	e->diag.shed_mask &= (uint8_t)~(1u << s);
 	e->chunk_inits = 1;
 	e->diag.slot_inits++;
@@ -435,6 +437,10 @@ static void apply_pending(engine_t *e, int unlimited)
 		e->over_run = 0;
 		e->ov_sum = 0;
 		e->ov_cnt = 0;
+		e->hard_run = 0;
+		e->calm_run = 0;
+		for (int s = 0; s < ENGINE_SLOTS; s++) e->shed_times[s] = 0;
+		e->forced_times = 0;
 		e->diag.shed_mask = 0;
 		e->diag.forced_bypass = 0;
 	}
@@ -445,6 +451,46 @@ static void apply_pending(engine_t *e, int unlimited)
 void engine_overload_clear(engine_t *e)
 {
 	e->shed_clear_req = e->shed_clear_req + 1u;
+}
+
+/* undo one guard action after a calm period; 1 if something was switched back on */
+static int overload_recover(engine_t *e)
+{
+	if (e->forced_bypass) {
+		e->forced_bypass = 0;
+		e->diag.forced_bypass = 0;
+		e->diag.overload_recovers++;
+		return 1;
+	}
+	int best = -1;
+	uint32_t best_c = 0;
+	for (int s = 0; s < ENGINE_SLOTS; s++) {
+		const fx_desc *d = fx_get(e->live_id[s]);
+		if (!e->shed[s] || !d || e->live_id[s] == FX_NONE) continue;
+		if (best < 0 || d->cpu_cycles < best_c) { best = s; best_c = d->cpu_cycles; }
+	}
+	if (best < 0) return 0;
+	e->shed[best] = 0; /* stopped and reset while shed: it fades in from silence */
+	e->diag.shed_mask &= (uint8_t)~(1u << best);
+	e->diag.overload_recovers++;
+	return 1;
+}
+
+static uint32_t recover_wait(const engine_t *e)
+{
+	uint32_t times = 0;
+	if (e->forced_bypass) times = e->forced_times;
+	else
+		for (int s = 0; s < ENGINE_SLOTS; s++)
+			if (e->shed[s] && (times == 0 || e->shed_times[s] < times)) times = e->shed_times[s];
+	uint32_t sh = times > 1 ? times - 1 : 0;
+	if (sh > 4) sh = 4;
+	return e->overload_recover_win << sh;
+}
+
+void engine_overload_skip(engine_t *e)
+{
+	e->chunk_inits = 0;
 }
 
 int engine_overload_feed(engine_t *e, uint32_t cycles, uint32_t limit)
@@ -461,11 +507,28 @@ int engine_overload_feed(engine_t *e, uint32_t cycles, uint32_t limit)
 	e->ov_cnt = 0;
 	e->diag.ovl_last_mean = mean;
 	if (mean > e->diag.ovl_max_mean) e->diag.ovl_max_mean = mean;
-	if (mean <= limit) { e->over_run = 0; return 0; }
+	if (mean <= limit) {
+		e->over_run = 0;
+		e->hard_run = 0;
+		/* calm: after a long calm stretch undo one action (with back-off) */
+		if (mean < limit - limit / 5u && (e->diag.shed_mask || e->forced_bypass) && e->overload_recover_win) {
+			if (++e->calm_run >= recover_wait(e)) {
+				e->calm_run = 0;
+				return overload_recover(e) ? 2 : 0;
+			}
+		} else {
+			e->calm_run = 0;
+		}
+		return 0;
+	}
+	e->calm_run = 0;
 	e->diag.overload_windows++;
-	int hard = mean > limit + limit / 8u; /* the audio thread cannot keep up: act now */
+	/* safety net: the audio thread cannot keep up (two windows in a row over 9/8) */
+	e->hard_run = mean > limit + limit / 8u ? e->hard_run + 1u : 0u;
+	int hard = e->hard_run >= ENGINE_OVERLOAD_HARD_WINDOWS;
 	if (!hard && ++e->over_run < e->overload_n) return 0;
 	e->over_run = 0;
+	e->hard_run = 0;
 
 	/* the most expensive slot that still runs (declared cost; later in the chain on a tie) */
 	int best = -1;
@@ -478,12 +541,14 @@ int engine_overload_feed(engine_t *e, uint32_t cycles, uint32_t limit)
 	}
 	if (best >= 0) {
 		e->shed[best] = 1;        /* fades out in the next chunk, then stops */
+		if (e->shed_times[best] < 255) e->shed_times[best]++;
 		e->diag.shed_mask |= (uint8_t)(1u << best);
 		e->diag.overload_sheds++;
 		return 1;
 	}
 	if (!e->forced_bypass) {
 		e->forced_bypass = 1;
+		if (e->forced_times < 255) e->forced_times++;
 		e->diag.forced_bypass = 1;
 		e->diag.overload_forced++;
 		return 1;
