@@ -624,6 +624,55 @@ static void test_saveev(void)
 	CHECK(!saveev_due(&s, 200000, 1));
 }
 
+static void test_battery_gauge(void)
+{
+	/* conversion: Tape Looper's anchor raw 2380 ~ 4.21 V; the owner's 2244 while charging */
+	CHECK(abs(batt_mv_from_raw(2380) - 4184) <= 30);
+	CHECK(abs(batt_mv_from_raw(2244) - 3944) <= 5);
+	CHECK(batt_mv_from_raw(-1) == -1);
+	/* table: ends, monotonic */
+	CHECK(batt_pct_from_mv(3000) == 0 && batt_pct_from_mv(3300) == 0 && batt_pct_from_mv(4200) == 100 && batt_pct_from_mv(4400) == 100);
+	int prev = -1;
+	for (int mv = 3200; mv <= 4300; mv += 5) { int p = batt_pct_from_mv(mv); CHECK(p >= prev && p >= 0 && p <= 100); prev = p; }
+	CHECK(batt_pct_from_mv(3800) == 50);
+	/* hysteresis: +-20 mV noise around a level never moves the shown value by itself */
+	batt_t b;
+	batt_init(&b);
+	int raw0 = 2150; /* ~3.78 V */
+	int shown0 = -2, moves = 0, last = -1;
+	for (uint32_t t = 0; t < 120000; t += 10) {
+		int noise = (int)((t * 7919u) % 21u) - 10; /* +-10 raw = +-18 mV */
+		batt_feed(&b, raw0 + noise, 0, 0, t);
+		if (shown0 == -2) shown0 = batt_shown(&b);
+		if (batt_shown(&b) != last) { moves++; last = batt_shown(&b); }
+	}
+	CHECK_MSG(moves <= 2, "moves %d", moves);
+	/* a real drop shows up within a few seconds */
+	for (uint32_t t = 120000; t < 140000; t += 10) batt_feed(&b, 2000, 0, 0, t);
+	CHECK(batt_shown(&b) < shown0 - 10);
+	/* charging: voltage reads high -> offset, capped at 95 until the charger reports done */
+	batt_init(&b);
+	for (uint32_t t = 0; t < 30000; t += 10) batt_feed(&b, 2420, 1, 0, t); /* ~4.25 V while charging */
+	CHECK(batt_shown(&b) <= BATT_CHARGING_CAP);
+	for (uint32_t t = 30000; t < 40000; t += 10) batt_feed(&b, 2420, 0, 1, t);
+	CHECK(batt_shown(&b) == 100);
+	/* the owner's charging reading: 3.94 V - 0.1 V -> about 60 % */
+	batt_init(&b);
+	for (uint32_t t = 0; t < 30000; t += 10) batt_feed(&b, 2244, 1, 0, t);
+	CHECK_MSG(batt_shown(&b) >= 50 && batt_shown(&b) <= 70, "shown %d", batt_shown(&b));
+	/* LED bar: n of 8 steady, the top one pulses while charging, steady when not */
+	uint8_t pl[4], tr[4];
+	batt_leds(50, 0, 0, pl, tr);
+	CHECK(pl[0] && pl[1] && pl[2] && pl[3] && !tr[0] && !tr[3]);   /* 4 of 8 */
+	batt_leds(100, 0, 0, pl, tr);
+	CHECK(tr[3] == 60 && pl[0] == 60);
+	batt_leds(0, 0, 0, pl, tr);
+	CHECK(pl[0] && !pl[1]);                                         /* at least one LED */
+	uint8_t lo = 255, hi = 0;
+	for (uint32_t t = 0; t < 2400; t += 50) { batt_leds(30, 1, t, pl, tr); lo = pl[2] < lo ? pl[2] : lo; hi = pl[2] > hi ? pl[2] : hi; CHECK(pl[0] == 60 && pl[1] == 60 && !pl[3]); }
+	CHECK(hi > 100 && lo < 20);                                      /* the 3rd LED pulses */
+}
+
 int main(void)
 {
 	RUN(test_save_sched_rules);
@@ -640,5 +689,6 @@ int main(void)
 	RUN(test_boot_and_standby);
 	RUN(test_scanfsm_timeout_recovery);
 	RUN(test_saveev);
+	RUN(test_battery_gauge);
 	T_DONE();
 }

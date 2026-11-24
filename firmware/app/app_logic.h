@@ -173,6 +173,38 @@ scan_act_t scanfsm_step(scanfsm_t *f, uint32_t now_ms, int ended);
 /* ms since the last good scan (0xFFFFFFFF if none yet) */
 uint32_t scanfsm_age(const scanfsm_t *f, uint32_t now_ms);
 
+/* ---- 2e. battery fuel gauge (rc6) -----------------------------------------------------
+ * AIN4 (P0.28) reads the battery through an on-board divider (SP-1-dev wiki "Battery
+ * charger"). Conversion with the scanner's setup (gain 1/6, internal 0.6 V reference, 12-bit):
+ * V_pin = raw * 3.6 V / 4096. BATT_DIVIDER_X1000 is the ONE assumed constant: 2.0, derived
+ * from Tape Looper's anchor "raw ~2380 = ~4.21 V at rest" (2380 * 3.6 / 4096 = 2.092 V at the
+ * pin -> ratio 2.01, i.e. a 1:1 divider). CALCULATED, UNCALIBRATED.
+ * Percent: Li-ion resting-voltage table 3.30 V = 0 % .. 4.20 V = 100 % (nonlinear, linear in
+ * between table points). While charging the terminal voltage reads high, so 100 mV is taken off
+ * and the level is capped at 95 % until the charger reports done; running with audio the
+ * voltage sags a little under load (not corrected; smoothed). Smoothing: exponential average
+ * (~2 s), shown level moves only by >= 3 % (or to/from the 95/100 cap) and at most every 2 s. */
+#define BATT_DIVIDER_X1000 2000
+#define BATT_CHARGE_OFFSET_MV 100
+#define BATT_CHARGING_CAP 95
+#define BATT_HYST_PCT 3
+#define BATT_UPDATE_MS 2000u
+int batt_mv_from_raw(int raw);          /* <0 raw -> -1 */
+int batt_pct_from_mv(int mv);           /* 0..100 */
+typedef struct {
+	float mv;          /* smoothed */
+	int have;
+	int shown;         /* displayed percent, -1 none yet */
+	uint32_t last_upd;
+} batt_t;
+void batt_init(batt_t *b);
+/* feed one raw reading (any rate; tau ~2 s at 8-10 ms per call) */
+void batt_feed(batt_t *b, int raw, int charging, int charge_done, uint32_t now_ms);
+int batt_shown(const batt_t *b);        /* 0..100, -1 unknown */
+/* LED bar for the charge standby: n = 1..8 LEDs (PLAY-side 1-4 then T1-T4) for the level;
+ * the top one pulses slowly while charging; all steady when done. Brightness 0..255. */
+void batt_leds(int pct, int charging, uint32_t now_ms, uint8_t play[4], uint8_t track[4]);
+
 /* ---- 3. audio quiet detector -------------------------------------------------------- */
 #define QUIET_PEAK 0.0005f         /* -66 dBFS: below this a block counts as silent */
 typedef struct {

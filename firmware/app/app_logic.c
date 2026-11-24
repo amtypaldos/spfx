@@ -277,6 +277,76 @@ uint32_t scanfsm_age(const scanfsm_t *f, uint32_t now)
 	return f->have_ok ? now - f->last_ok_ms : 0xFFFFFFFFu;
 }
 
+/* ---- battery fuel gauge ---- */
+
+int batt_mv_from_raw(int raw)
+{
+	if (raw < 0) return -1;
+	/* raw * 3600 mV / 4096 at the pin, times the divider ratio */
+	return (int)(((int64_t)raw * 3600 * BATT_DIVIDER_X1000) / (4096 * 1000));
+}
+
+int batt_pct_from_mv(int mv)
+{
+	static const int t[][2] = {
+		{3300, 0}, {3450, 5}, {3600, 10}, {3680, 20}, {3730, 30}, {3770, 40},
+		{3800, 50}, {3840, 60}, {3900, 70}, {3960, 80}, {4050, 90}, {4200, 100},
+	};
+	const int n = (int)(sizeof t / sizeof t[0]);
+	if (mv <= t[0][0]) return 0;
+	if (mv >= t[n - 1][0]) return 100;
+	for (int i = 1; i < n; i++)
+		if (mv <= t[i][0])
+			return t[i - 1][1] + (mv - t[i - 1][0]) * (t[i][1] - t[i - 1][1]) / (t[i][0] - t[i - 1][0]);
+	return 100;
+}
+
+void batt_init(batt_t *b)
+{
+	memset(b, 0, sizeof *b);
+	b->shown = -1;
+}
+
+void batt_feed(batt_t *b, int raw, int charging, int done, uint32_t now)
+{
+	int mv = batt_mv_from_raw(raw);
+	if (mv < 0) return;
+	if (!b->have) { b->mv = (float)mv; b->have = 1; }
+	else b->mv += ((float)mv - b->mv) * (1.0f / 200.0f); /* ~2 s at 10 ms per reading */
+	int est = (int)b->mv - (charging ? BATT_CHARGE_OFFSET_MV : 0);
+	int pct = batt_pct_from_mv(est);
+	if (charging && pct > BATT_CHARGING_CAP) pct = BATT_CHARGING_CAP;
+	if (done) pct = 100;                       /* the charger says full */
+	if (b->shown < 0) { b->shown = pct; b->last_upd = now; return; }
+	if (now - b->last_upd < BATT_UPDATE_MS) return;
+	int d = pct - b->shown;
+	if (d >= BATT_HYST_PCT || d <= -BATT_HYST_PCT || pct == 100 || (b->shown == 100 && pct < 100 && d <= -BATT_HYST_PCT)) {
+		b->shown = pct;
+	}
+	if (b->shown == 100 && !done && charging) b->shown = BATT_CHARGING_CAP; /* never 100 % while charging */
+	b->last_upd = now;
+}
+
+int batt_shown(const batt_t *b)
+{
+	return b->shown;
+}
+
+void batt_leds(int pct, int charging, uint32_t now, uint8_t play[4], uint8_t track[4])
+{
+	int n = pct <= 0 ? 1 : (pct * 8 + 99) / 100; /* 1..8 */
+	if (n < 1) n = 1;
+	if (n > 8) n = 8;
+	const uint32_t ph = now % 2400u;
+	const uint32_t tri = ph < 1200u ? ph : 2400u - ph;
+	for (int i = 0; i < 8; i++) {
+		uint8_t v = 0;
+		if (i < n) v = 60;
+		if (i == n - 1 && charging) v = (uint8_t)(8u + tri * 112u / 1200u); /* slow pulse */
+		if (i < 4) play[i] = v; else track[i - 4] = v;
+	}
+}
+
 /* ---- quiet detector ---- */
 
 void quiet_feed(quiet_t *q, float in_peak, float out_peak)
