@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SP-1 FX companion</title>
+<meta name="description" content="Browser companion for SP-1 FX: four effect slots, live control over USB, presets stored in your browser. Experimental, not yet tested on hardware.">
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232869dc'/%3E%3Cpath d='M7 20h4l3-9 4 12 3-9h4' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body>
+<div class="ambient" aria-hidden="true"></div>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="topbar glass">
+  <a class="brand" href="#main" aria-label="SP-1 FX">SP-1 <span>FX</span></a>
+  <nav class="page-tabs" role="tablist" aria-label="Views">
+    <button id="tabLive" class="page-tab" role="tab" aria-selected="true" aria-controls="liveView">Live</button>
+    <button id="tabPresets" class="page-tab" role="tab" aria-selected="false" aria-controls="presetsView" tabindex="-1">Presets</button>
+  </nav>
+  <div class="header-actions">
+    <button id="connect" class="btn primary" type="button">Connect SP-1</button>
+    <button id="demo" class="btn" type="button">Demo device</button>
+    <button id="disconnect" class="btn" type="button" hidden>Disconnect</button>
+  </div>
+  <div id="conn" class="conn" data-state="disconnected" role="status" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="connText">Not connected</span></div>
+</header>
+
+<main id="main" tabindex="-1">
+  <div id="support" class="notice" hidden role="note"></div>
+  <div id="notice" class="notice" hidden role="alert"><span id="noticeText"></span><button id="noticeClose" type="button" aria-label="Dismiss message">Dismiss</button></div>
+
+  <section id="liveView" role="tabpanel" aria-labelledby="tabLive">
+    <p class="eyebrow">Live companion</p>
+    <h1>Four effects, live.</h1>
+    <p class="hint lead">Edits here go to the SP-1 over USB. The device is the source of truth: turning a physical fader updates this page, and a rejected change snaps back with the reason.</p>
+
+    <div id="liveWrap" class="stale-wrap stale">
+      <div class="tiles" aria-label="Device readouts">
+        <div class="tile">Firmware<strong id="tFw">&mdash;</strong><small id="tFwSub">protocol &mdash;</small></div>
+        <div class="tile">CPU<strong id="tCpu">&mdash;</strong><small id="tCpuSub">peak &mdash;</small><div class="bar" id="cpuBar"><i></i></div></div>
+        <div class="tile">DSP memory<strong id="tMem">&mdash;</strong><small id="tMemSub">of &mdash;</small><div class="bar" id="memBar"><i></i></div></div>
+        <div class="tile">Under / overruns<strong id="tRuns">&mdash;</strong><small>audio buffer faults</small></div>
+        <div class="tile">Clips (in / out)<strong id="tClips">&mdash;</strong><small id="tNan">NaN events &mdash;</small></div>
+      </div>
+
+      <div class="stack">
+        <div class="card" aria-labelledby="gTitle">
+          <h2 id="gTitle">Global</h2>
+          <div class="global">
+            <button id="gBypass" class="toggle" type="button" aria-pressed="false"><span class="sw" aria-hidden="true"></span><span>Global bypass</span></button>
+            <div class="ctl"><div class="top"><label class="name" for="master">Master volume</label><span class="val" id="masterVal"></span></div><input id="master" type="range" min="0" max="200" step="1" value="150"></div>
+            <div class="ctl"><div class="top"><label class="name" for="gain">Input gain</label><span class="val" id="gainVal"></span></div><input id="gain" type="range" min="-120" max="120" step="1" value="0"></div>
+            <label class="field">BPM<input id="bpm" type="number" min="30" max="300" step="0.1" value="120" inputmode="decimal"></label>
+          </div>
+        </div>
+
+        <div class="card" aria-labelledby="lvTitle">
+          <h2 id="lvTitle">Levels</h2>
+          <div class="levels">
+            <div class="ctl"><div class="top"><span class="name" id="inLbl">Input</span><span class="val" id="inVal">&mdash;</span></div><div class="bar" id="inBar" role="meter" aria-labelledby="inLbl" aria-valuemin="-60" aria-valuemax="0" aria-valuenow="-60"><i></i></div></div>
+            <div class="ctl"><div class="top"><span class="name" id="outLbl">Output</span><span class="val" id="outVal">&mdash;</span></div><div class="bar" id="outBar" role="meter" aria-labelledby="outLbl" aria-valuemin="-60" aria-valuemax="0" aria-valuenow="-60"><i></i></div></div>
+          </div>
+        </div>
+
+        <div class="card" aria-labelledby="chTitle">
+          <h2 id="chTitle">Signal chain</h2>
+          <p class="hint" style="margin:0 0 12px">Audio flows left to right through the slots in this order.</p>
+          <ol id="chain" class="chain" aria-label="Signal chain order"></ol>
+        </div>
+
+        <div id="slots" class="slots"></div>
+
+        <details id="demoPanel" class="card demo" hidden open>
+          <summary>Demo device controls</summary>
+          <p class="hint" style="margin:10px 0 0">The demo device is a simulation running in this page. These buttons act like physical controls on the SP-1 and send events to the app.</p>
+          <div class="btns">
+            <button id="dFader" class="btn small" type="button">Move a random fader</button>
+            <label>Slot <select id="dSlot" aria-label="Slot for simulated effect cycle"><option value="0">1</option><option value="1">2</option><option value="2">3</option><option value="3">4</option></select></label>
+            <button id="dCycle" class="btn small" type="button">Cycle effect on slot</button>
+            <button id="dOverload" class="btn small" type="button">Try Delay in every slot</button>
+            <label><input id="dAuto" type="checkbox"> Auto-move faders</label>
+          </div>
+          <p class="hint" id="dInfo" style="margin:6px 0 0"></p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section id="presetsView" role="tabpanel" aria-labelledby="tabPresets" hidden>
+    <p class="eyebrow">Presets</p>
+    <h1>Save a sound.</h1>
+    <p class="hint lead">Presets are stored only in this browser (no account, no cloud). Export them as JSON to back them up or share them.</p>
+    <div id="storeNotice" class="notice error" hidden role="note">Browser storage is unavailable here, so presets will be lost when you close this page. Use Export to keep them.</div>
+
+    <div class="presets">
+      <div class="card">
+        <h2>Library</h2>
+        <ul id="plist" class="plist" aria-label="Presets"></ul>
+        <div class="actions">
+          <button id="pRestore" class="btn small" type="button">Restore factory presets</button>
+        </div>
+        <p class="hint" id="restoreHint" style="margin:0;font-size:12px">Re-adds the six factory presets. Your own presets are kept.</p>
+      </div>
+
+      <div class="stack" style="margin:0">
+        <div class="card" id="pDetail" aria-live="polite">
+          <p class="eyebrow" id="pTag"></p>
+          <h2 id="pName">No preset selected</h2>
+          <ul id="pSlots" class="pslots" aria-label="Slots in this preset"></ul>
+          <p class="kv" id="pInfo"></p>
+          <div class="actions">
+            <button id="pLoad" class="btn primary" type="button">Load to device</button>
+            <button id="pDup" class="btn" type="button">Duplicate</button>
+            <button id="pExport" class="btn" type="button">Export JSON</button>
+            <button id="pUpdate" class="btn" type="button">Overwrite with current settings</button>
+            <button id="pDelete" class="btn danger" type="button">Delete</button>
+          </div>
+          <form id="renameForm" class="actions" style="align-items:end">
+            <label class="field" style="flex:1;min-width:180px">Rename<input id="pRename" type="text" maxlength="40" autocomplete="off"></label>
+            <button class="btn" type="submit">Rename</button>
+          </form>
+          <p id="pMsg" class="msg" role="status"></p>
+          <label class="field" id="exportWrap" hidden>Preset JSON (copy or save)<textarea id="pExportText" readonly></textarea></label>
+        </div>
+
+        <div class="card">
+          <h2>Save current settings</h2>
+          <form id="saveForm" class="actions" style="align-items:end;margin-top:0">
+            <label class="field" style="flex:1;min-width:180px">Name<input id="saveName" type="text" maxlength="40" autocomplete="off" placeholder="My preset"></label>
+            <button id="saveBtn" class="btn primary" type="submit">Save as new preset</button>
+          </form>
+          <p class="hint" id="saveHint" style="margin:0;font-size:12px"></p>
+        </div>
+
+        <div class="card">
+          <h2>Import</h2>
+          <p class="hint" style="margin:0 0 10px">Accepts a <code>sp1fx.preset</code> version 1 JSON file. Numbers are clamped and unknown fields are ignored; other schemas or versions are rejected.</p>
+          <div class="actions" style="margin-top:0"><label class="btn small" for="pFile" style="display:inline-flex;align-items:center;cursor:pointer">Choose file&hellip;</label><input id="pFile" type="file" accept=".json,application/json" class="sr-only"></div>
+          <label class="field">Or paste JSON<textarea id="pPaste" spellcheck="false" placeholder='{"schema":"sp1fx.preset","version":1,...}'></textarea></label>
+          <div class="actions"><button id="pImport" class="btn" type="button">Import pasted JSON</button></div>
+          <p id="importMsg" class="msg" role="status"></p>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <p class="hint" style="margin:0">SP-1 FX companion is experimental. The device protocol it speaks is specified in <code>docs/PROTOCOL.md</code>; the firmware side is not written yet, and this page has not been tested against a real SP-1. Everything runs locally in your browser: no accounts, no cloud, no analytics. Styling is modelled on the SP-1 Tape Looper companion (MIT, &copy; 2026 chattock). Not affiliated with Teenage Engineering.</p>
+</footer>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

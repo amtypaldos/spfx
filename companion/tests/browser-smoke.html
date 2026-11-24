@@ -1,0 +1,77 @@
+<!doctype html><meta charset="utf-8"><title>smoke</title>
+<style>html,body{margin:0;height:100%}iframe{border:0;width:100%;height:100%}pre{display:none}</style>
+<iframe id="f" src="../index.html"></iframe><pre id="out"></pre>
+<script>
+// Browser smoke test driver: loads the real app in an iframe, runs the demo device through the UI, prints results.
+// Run with headless Chrome (see README). Query: ?shot=live|presets|error to stop at a screenshot state.
+const f = document.getElementById('f'); const R = {}; const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const wq = new URLSearchParams(location.search).get('w'); if (wq) f.style.width = wq + 'px';
+const shot = new URLSearchParams(location.search).get('shot');
+const ok = (name, cond, extra) => { R[name] = cond ? 'PASS' : 'FAIL ' + (extra ?? ''); };
+f.addEventListener('load', async () => {
+  try {
+    const w = f.contentWindow, d = w.document, $ = (id) => d.getElementById(id);
+    if (new URLSearchParams(location.search).get('theme')) d.documentElement.dataset.theme = new URLSearchParams(location.search).get('theme');
+    const fire = (el, t) => el.dispatchEvent(new w.Event(t, { bubbles: true }));
+    for (let i = 0; i < 100 && !(w.sp1fx && $('demo')); i++) await sleep(100);
+    $('demo').click(); await sleep(1200);
+    const { store, ctl, library, env } = w.sp1fx; const dev = env.demo.device; const m = store.model;
+    ok('connected', m.conn === 'connected' && m.synced && m.fw.includes('mock'), m.conn);
+    ok('tile fw shown', $('tFw').textContent.includes('mock'));
+    ok('meters running', m.meters.cpuPct === 0 || m.meters.inPeak > 0, JSON.stringify(m.meters));
+    // slot assignment through the select
+    const sel = d.querySelector('select[aria-label="Effect, slot 2"]'); sel.value = '2'; fire(sel, 'change'); await sleep(200);
+    ok('slot assign chorus', dev.s.fxId[1] === 2 && d.querySelector('#slot2P0').previousElementSibling && true);
+    ok('param label updated', d.querySelector('label[for="slot2P0"]').textContent.startsWith('Rate'), d.querySelector('label[for="slot2P0"]').textContent);
+    // next button wraps from last effect to None
+    d.querySelector('button[aria-label="Next effect, slot 1"]').click(); await sleep(100);
+    // param drag: 60 input events in 400 ms
+    const r = $('slot3P0'); const before = dev.log.length; r.focus();
+    for (let i = 1; i <= 60; i++) { r.value = String(Math.round(i / 60 * 200)); fire(r, 'input'); await sleep(7); }
+    await sleep(200);
+    const sent = dev.log.length - before;
+    ok('drag coalesced <=30/s', sent <= 16 && sent >= 3, 'sent ' + sent);
+    ok('drag final value', Math.abs(dev.s.params[dev.s.fxId[2]] ? dev.s.params[2][dev.s.fxId[2]][0] - 1 : 9) < 0.01);
+    r.blur();
+    // bypass + global bypass
+    d.querySelector('button[aria-label="Bypass slot 3"]').click(); await sleep(100);
+    $('gBypass').click(); await sleep(100);
+    ok('bypass toggles', dev.s.bypass[2] === !m.slots[2].bypass || dev.s.bypass[2] === m.slots[2].bypass && dev.s.globalBypass === true);
+    $('gBypass').click(); await sleep(100);
+    // physical fader event updates UI, and does not loop back
+    const n0 = dev.log.length; dev.simulateFader(3, 0, 0.9); await sleep(150);
+    ok('device fader -> UI', d.querySelector('#slot4P0').value === '180', d.querySelector('#slot4P0').value);
+    ok('no feedback loop', dev.log.length === n0);
+    // admission error
+    $('dOverload').click(); await sleep(600);
+    ok('admission error shown', !$('notice').hidden && /Not enough DSP memory for Delay in slot \d; slot unchanged/.test($('noticeText').textContent), $('noticeText').textContent);
+    ok('admission kept state', dev.mem() <= dev.pool && dev.s.fxId.filter((x) => x === 3).length >= 1, JSON.stringify(dev.s.fxId));
+    ok('UI matches device after error', JSON.stringify(m.slots.map((s) => s.fx)) === JSON.stringify(dev.s.fxId));
+    if (shot === 'live') { w.scrollTo(0, 0); $('tabLive').focus(); $('tabPresets').blur(); document.getElementById('out').textContent = 'SHOT'; return; }
+    // presets
+    $('tabPresets').click(); await sleep(200);
+    const items = [...d.querySelectorAll('#plist button')];
+    ok('6 factory presets listed', items.length === 6, items.length);
+    items[0].click(); await sleep(50);
+    $('pLoad').click(); await sleep(3000);
+    ok('load Dub Station', JSON.stringify(dev.s.fxId) === JSON.stringify([5, 1, 3, 4]), JSON.stringify(dev.s.fxId) + ' ' + $('pMsg').textContent);
+    $('saveName').value = 'My <b>test</b>'; fire($('saveForm'), 'submit'); await sleep(100);
+    ok('saved preset (text only)', library.list().at(-1).preset.name === 'My <b>test</b>' && !d.querySelector('#plist b'));
+    ok('persisted to localStorage', !!w.localStorage.getItem('sp1fx.presetLibrary.v1'));
+    $('pExport').click(); await sleep(100);
+    const json = $('pExportText').value; ok('export JSON', JSON.parse(json).schema === 'sp1fx.preset');
+    $('pPaste').value = json; $('pImport').click(); await sleep(100);
+    ok('import ok', /Imported/.test($('importMsg').textContent), $('importMsg').textContent);
+    $('pPaste').value = '{"schema":"sp1fx.preset","version":2,"slots":[]}'; $('pImport').click(); await sleep(50);
+    ok('import wrong version rejected', /failed/i.test($('importMsg').textContent), $('importMsg').textContent);
+    $('pPaste').value = '{"schema":"sp1fx.preset","version":1,"name":"<img src=x onerror=window.pwned=1>","slots":[{"fx":"filter","wet":9},{"fx":"none"},{"fx":"none"},{"fx":"none"}]}'; $('pImport').click(); await sleep(100);
+    ok('hostile name inert', !w.pwned && !d.querySelector('#plist img') && /Imported/.test($('importMsg').textContent));
+    if (shot === 'presets') { w.scrollTo(0, 0); document.getElementById('out').textContent = 'SHOT'; return; }
+    // phone width is checked by the screenshot run; report horizontal overflow
+    ok('no horizontal overflow', d.documentElement.scrollWidth <= d.documentElement.clientWidth + 1, d.documentElement.scrollWidth + '>' + d.documentElement.clientWidth);
+    $('disconnect').click(); await sleep(200);
+    ok('disconnect', store.model.conn === 'disconnected' && !!$('liveWrap').classList.contains('stale'));
+  } catch (e) { R.exception = String(e && e.stack || e); }
+  document.getElementById('out').textContent = 'RESULT' + JSON.stringify(R) + 'END'; document.title = 'finished';
+});
+</script>

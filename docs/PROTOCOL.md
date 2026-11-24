@@ -14,10 +14,10 @@ Each message is `COBS(body) 0x00`. Body (all multi-byte integers **little-endian
 | 1 | `ver` = 1 |
 | 1 | `type` |
 | 1 | `seq` (host requests: host picks; responses echo it; device events use 0) |
-| n | payload (0..250 bytes) |
+| n | payload (0..500 bytes) |
 | 2 | CRC-16/CCITT-FALSE over `ver..payload` (poly 0x1021, init 0xFFFF) |
 
-Max body 256 bytes. A frame that fails COBS or CRC is dropped silently; the host retries after 500 ms (max 3). Normalised values (`u16n`) are `round(x*65535)`, x in 0..1.
+Max body 512 bytes (payload 500 + 5 bytes of overhead + COBS expansion is handled by the framer). The STATE message is ~383 bytes for 11 effects, which is why the limit is above 256. A frame that fails COBS or CRC is dropped silently; the host retries after 500 ms (max 3). Normalised values (`u16n`) are `round(x*65535)`, x in 0..1.
 
 ## Host to device
 | type | name | payload | response |
@@ -45,13 +45,20 @@ Max body 256 bytes. A frame that fails COBS or CRC is dropped silently; the host
 
 **0x83 STATE**: the config payload exactly as `store_encode()` produces it (see `firmware/storage/config_store.c`): `fx_id[4] bypass[4] order[4] global u8, reserved u8, fx_count u8, in_gain_cdB i16, master u16n, bpm10 u16, wet[4] u16n, params[4][fx_count][4] u16n`, followed by `ui_mode u8 (0 perform, 1 edit), edit_slot u8`. `params` holds the remembered values for **every** effect in every slot, not just the active one.
 
-**0x90 RESULT**: `request_type u8, code u8`. Codes: 0 ok, 1 bad argument, 2 out of DSP memory, 3 CPU budget exceeded, 4 busy, 5 storage error. On 2 or 3 the previous assignment is unchanged.
+**0x90 RESULT**: `request_type u8, code u8` (matched to its request by `seq`; it does not carry the slot, so a host that sees a non-zero code should re-read GET_STATE). A GET_FX with an out-of-range index is answered with 0x90 code 1. FACTORY_RESET has no event; the host re-reads GET_STATE afterwards. Codes: 0 ok, 1 bad argument, 2 out of DSP memory, 3 CPU budget exceeded, 4 busy, 5 storage error. On 2 or 3 the previous assignment is unchanged.
 
 **0xA0 EVENT** (unsolicited, seq 0): `setter_type u8` followed by that setter's payload, sent when the **device** changed something (a physical fader, button gesture, or another host). Host-originated changes are acknowledged with 0x90 and are **not** echoed back, which prevents feedback loops.
 
 **0xA1 ADMISSION_ERROR** (unsolicited): `slot u8, fx u8, code u8`. Sent when a physical effect-cycle was rejected, so the companion can show why.
 
 **0xA2 METERS** (only while subscribed): `in_peak u16, out_peak u16` (linear, 32768 = full scale, peak since the last report), `cpu_pct u8, cpu_peak_pct u8, mem_used u32, in_clips u32, out_clips u32, underruns u32, overruns u32, nan_events u32, ui_mode u8, edit_slot u8, flags u8` (bit0 = global bypass).
+
+## Definitions (v1)
+- `fx_count` counts **None** (id 0), so it is 11 for the current effect set. Effect ids are the firmware enum: none, filter, chorus, delay, reverb, saturation, flanger, bitcrusher, tremolo, compressor, tape_wobble.
+- `order[position]` holds the **slot index** processed at that position (a permutation of 0..3).
+- Normalised-to-real mapping: `lin`: `min + n*(max-min)`; `log`: `min*(max/min)^n`; `step`: `min + floor(n*(max-min+1))`, capped at `max`.
+- Admission (what 0x90 codes 2 and 3 mean): the device checks the **CPU budget first**, then memory, summed over all four slots, with the replaced slot's own effect excluded. The companion may predict this, but the device decides.
+- `ui_mode` and `edit_slot` are reported only; there is no message to set them.
 
 ## Rules
 - Fader changes are rate-limited by the device to 20 events/s per control. The host should coalesce slider drags to about 30 messages/s.
