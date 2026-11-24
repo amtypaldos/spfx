@@ -1,31 +1,86 @@
 # SP-1 FX v1: integrated firmware bring-up (rc3 current)
 
-## rc3 (2026-11-24): power-off hold 3 s with LED countdown -- NOT RUN ON HARDWARE
+## rc3 (2026-11-24) -- NOT RUN ON HARDWARE
 
 | | |
 |---|---|
 | File | `~/spfx/flash-ready/sp1fx-v1-rc3.bin` (ELF: `sp1fx-v1-rc3.elf`) |
-| SHA-256 | `57cbe11bd401bc8d621652a408ccbb34dbe0ff2265edcd6655defb15fe230992` (in `SHA256SUMS`) |
-| Size | 152,852 B at 0x20000, `check_image.py` PASS, two clean builds identical |
+| SHA-256 | `ec36e3befc937ab229822cc036d2e7788865134261af7d61a5631c06f3fa7199` (in `SHA256SUMS`) |
+| Size | 149,612 B at 0x20000, `check_image.py` PASS (incl. `--reserve`), two clean builds identical |
 
-rc2 on hardware: the "crash" the owner saw while cycling presets was the **FN-hold power off**
-(console: `POWER OFF`, `stalls=0`, no CRASH), not a hang. rc3 changes only that, plus one diag
-field:
-- **Power off = FUNCTION held alone for 3 s** (was 1.5 s). During the last second the four
-  PLAY-side LEDs fill up one by one (1, 2, 3, 4 lit); release FUNCTION before all four are
-  lit and nothing happens.
-- **Any other button pressed during the same FUNCTION press cancels the power off for that
-  press** (rocker, channel, PLAY, VOL). In rc2 FN + rocker already cancelled it, but only
-  from the moment the rocker was pressed: holding FN 1.5 s before or between rocker presses
-  powered off. Host-tested: FN down, 1.2 s, rocker tap, FN held 3 s more: no power off.
-- After a power off the next FUNCTION press wakes the chip into the TE bootloader, which then
-  starts the app (unchanged, intended: it is the only way back on).
-- `D` line: `win_max_period=` = the worst 42.7 ms guard window since the previous `D` line
-  (next to `win=` last window and `max=` since boot).
+(An interim rc3 with a 3 s hold, 57cbe11b..., was built but never handed over; it is replaced.)
 
-rc3 test: as rc2 below; additionally hold FN alone and watch the countdown (release at 2-3
-LEDs: no power off; keep holding: power off at 3 s), and cycle presets with FN held for
-several seconds between rocker presses: no power off.
+### 1. Controls no longer die (rc2 bug)
+rc2 read the SAADC asynchronously through Zephyr's driver; one scan per boot never finished
+(`adc_to=1`) and rc2 then waited for it forever: no control events for the rest of the run.
+rc3 drops Zephyr's ADC driver and scans the SAADC itself at register level
+(`firmware/drivers/saadc_scan.c`): no interrupts, never waits; a scan is started in one tick and
+collected in the next, and a scan that has not ended after 50 ms is stopped and restarted
+(host-tested state machine). At start it stops whatever the bootloader left running in the
+SAADC, clears its events/interrupts and disconnects any PPI channel aimed at a SAADC task
+(`ppi_cleared=` / `saadc_was_on=` in the `store` line tell whether there was anything).
+Same channel setup as the verified controls image. **Why a scan was lost is not proven.**
+
+New on the console: a `B <ms> buttons=...` line for every change of the decoded buttons, and
+every 2 s an extra `  ctl ...` line: loop `ticks=`, good `scans=`, `scan_age_ms=` (should stay
+< 20), raw ladder codes `lad_raw=` (idle < 110 / < 200), raw faders, the button mask, the
+debounced mask, and the FN state (`gpio armed down consumed long`), mode, held slot. If the
+controls ever die again, copy those lines.
+
+### 2. Power off / power on: FUNCTION held 4 s, 8-LED fill
+- **Off:** hold FUNCTION **alone**. Nothing shows for the first 0.5 s (a tap or FN + rocker
+  never flashes it). Then one more LED every 0.5 s: the four PLAY-side LEDs left to right, then
+  T1, T2, T3, T4; lit LEDs stay lit. At 4.0 s the eighth lights, all eight stay on for 0.3 s and
+  the device powers off. Release before that, or press any other button during the same
+  FUNCTION press (rocker, channel, PLAY, VOL): no power off, the normal display returns.
+- **On:** the same 4 s hold with the same fill. Releasing earlier puts the unit back to sleep
+  (on battery). Implemented in the app after the TE bootloader hands over (nothing outside the
+  app slot is touched), so the 4 s count starts when the app starts: the bootloader's own
+  start-up time comes on top (not measured).
+- **USB plugged into a unit that is off:** it does **not** start. It charges and shows the charge
+  state on the first PLAY-side LED: a slow gentle pulse while charging, steady dim when the
+  charger reports done. Hold FUNCTION 4 s to switch on. Unplugging puts it back to System OFF.
+- **Powering off while plugged in** goes to that same charge display (a soft reset into the
+  standby, as Tape Looper does; System OFF with USB already present would have no wake edge).
+- **Never blocked:** watchdog or crash recovery, a power-on/battery/fresh-flash start with no
+  wake reason, a reset-pin or other soft reset start at once. (After a flash the bootloader's
+  reset reason decides; if it lands in the charge display, hold FUNCTION 4 s.)
+- **While running and charging:** the 4th PLAY-side LED blips dimly every 4 s when nothing else
+  uses it. `info` line: `vbus= pgood= charging= boot=`; companion: "USB power"/"charging".
+
+### 3. Charging (BQ24232) -- what the hardware offers (source findings, nothing verified)
+- `/CE` P0.21 (drive low = charging enabled), `/CHG` P0.22 (low = charging), `/PGOOD` P0.24 (low
+  = USB power good), `ISET` P1.00 (charge-current monitor, not used), battery divider on AIN4
+  P0.28 (SP-1-dev wiki "Battery charger"; Tape Looper `charger_init()`, MIT).
+- The charger charges by itself while `/CE` is low; rc3 drives it low at every start (earlier
+  sp1fx images never touched it). GPIO output levels are retained in System OFF (nRF52840),
+  so charging continues while off. The charge status cannot be read in System OFF (CPU off):
+  that is why "off with USB" is a standby loop with the CPU idle, not System OFF.
+- Battery voltage: `batt_raw=` in the `store` line (raw 12-bit, uncalibrated; Tape Looper's
+  interim anchors: ~2380 = full at rest, ~1900 = empty estimate).
+
+### 4. Overload guard (rc2: `shed=0xb` and effects silent until a preset change)
+- The guard now judges the **engine's own cycles** (what shedding can reduce), sustained limit
+  85 % of the block period as before, and the safety net needs **two** windows over 9/8 in a row.
+  rc2 judged whole-block time, which on the owner's unit averaged ~25 % above the engine
+  (USB/other threads 21 %), so USB or flash activity bursts (a 114 % window) shed effects.
+  Blocks during a flash write are left out.
+- **Auto-recovery:** after ~10 s of calm (window means under 80 % of the limit) one shed slot
+  comes back (the cheapest first); if it has to be shed again, the next wait doubles (max x16).
+- **Visible:** a shed slot's track LED blinks slowly (1 Hz, different from the 0.5 s takeover
+  cue); all of them blink when the guard forced bypass. The companion shows "overload guard:
+  slot N off" next to the CPU figure (METERS flags, docs/PROTOCOL.md).
+
+### rc3 test (in this order)
+1. Off -> hold FN 4 s: fill, unit starts. Off -> tap FN / hold 2 s: stays off.
+2. Running: controls (faders, T taps, FN + rocker presets, VOL) for 3 min. Every action must
+   produce `B`/`C`/`K` lines; the `  ctl` line must show `scans=` rising and `scan_age_ms` small.
+3. Hold FN alone: fill, power off at 4 s. Hold FN 2 s then press the rocker, keep FN 4 s more:
+   no power off.
+4. Off + plug USB: no start, LED pulse (charging) or steady (full). Unplug: dark.
+5. Running + plugged: FN hold 4 s: goes to the charge display, not dark.
+6. Load the heavy saved state, play music with the companion connected: report `D` lines
+   (`win_max_period=`, `shed=`); if a slot is shed its LED blinks and it comes back ~10 s later.
 
 ---
 
@@ -164,7 +219,7 @@ Line types (copy whole lines into your report):
 | `SAVE (...) rc=0 seq= page= slot= took N ms` | a settings record was written |
 | `FLASH erase page 0x... took N ms (ducked) i2s_err+.. usb_under+..` | a flash page erase ran |
 | `CRASH: ...` | the previous run crashed (printed every 10 s for a minute) |
-| `POWER OFF: ...` | FN held alone 3 s (rc3; 1.5 s in rc1/rc2) |
+| `POWER OFF: ...` | FN held alone 4 s (rc3; 1.5 s in rc1/rc2) |
 
 ## LEDs (monochrome, no numbers)
 
@@ -203,7 +258,7 @@ current volume** and the sync on/off state; it sets the preset's tempo.
 3. Open the console. Report the `I` line and the first `D`/`usb`/`threads` block. Expect
    `store_load=-1` on the very first boot, `cs42=ok tas=ok` in the `info` line, `i2s blk/s=750`.
 4. Wait 30 s: no reset (the `D t=` counter keeps rising, `boots=` in `info` stays the same).
-5. Hold FUNCTION 3 s (rc3; the PLAY-side LEDs fill up in the last second): `POWER OFF` line, LEDs off. Press FUNCTION: the bootloader starts the
+5. Hold FUNCTION 4 s (rc3; 8-LED fill): `POWER OFF` line, LEDs off. Press FUNCTION: the bootloader starts the
    app again (as with the earlier images; with USB plugged in it may stay dark until FUNCTION
    is pressed or USB is replugged, a known issue).
 
@@ -258,7 +313,7 @@ LED flash + bar; one Clean.
 3. Change things from the companion (an effect, wet, a parameter, BPM 100) and on the device
    (fader, VOL, FN + rocker): both sides stay in sync (device changes appear in the companion).
 4. **Persistence:** make a distinctive change (e.g. slot 1 = Bitcrusher, wet 70 %, volume
-   2 presses down), wait 5 s, then FN hold 3 s (power off) and FUNCTION to power on.
+   2 presses down), wait 5 s, then FN hold 4 s (power off) and FUNCTION to power on.
    Reconnect: the state must be restored. Also try: change something, wait 5 s, unplug USB
    (hard power loss if the battery is flat; otherwise just replug) and check again.
 5. Open `screen` again (companion closed). In the `store` line report `saves= erases=

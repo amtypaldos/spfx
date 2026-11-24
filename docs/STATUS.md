@@ -2,29 +2,55 @@
 
 Evidence key: **[HW]** observed on the owner's SP-1 (owner-run; see the hardware log). **[HOST]** verified by automated tests on a development Mac. **[SRC]** from upstream source/docs or our own build output. **[UNTESTED]** built but never run. **[TODO]** not started. The integrated image v1-rc1 has **not** been run on an SP-1.
 
-## v1-rc3 (2026-11-24): FN power-off hold -- NOT RUN ON HARDWARE
+## v1-rc3 (2026-11-24) -- NOT RUN ON HARDWARE
 
-`sp1fx-v1-rc3.bin`, SHA-256 `57cbe11bd401bc8d621652a408ccbb34dbe0ff2265edcd6655defb15fe230992`,
-152,852 B, check PASS, reproducible, 0 warnings, all host tests pass.
+`sp1fx-v1-rc3.bin`, SHA-256 `ec36e3befc937ab229822cc036d2e7788865134261af7d61a5631c06f3fa7199`,
+149,612 B, check PASS, reproducible, 0 warnings, all host tests pass. (An interim rc3 build with
+a 3 s hold, 57cbe11b..., was never handed over and is replaced.) Details/test: docs/BRINGUP_SP1FX.md.
 
-**rc2 on hardware [HW, owner-run, console read live by the lead]:** ran steadily (`stalls=0`,
-no CRASH/STALL; threads: audio 60 %, USB/other 21 %, main 1.4 %, idle 17 %). The owner's
-"crash" (audio stopped, Mac lost the device) was the FN-hold power off firing while cycling
-presets with FN + rocker (`POWER OFF` line). Whether rc2 fixed the rc1 watchdog resets is
-not settled by this one session, but none occurred in it.
-CPU with the owner's heavy saved state [HW]: engine `cpu` 48 % average, whole block 73 %
-average, guard window max 94 %: close to the guard (85 % mean for 3 windows / ~96 % for one
-window). No shed was reported. rc3 adds `win_max_period=` to the `D` line to watch this.
-First-boot default [SRC]: with no saved settings all four slots are bypassed, and bypassed
-slots are not processed (pass-through, same CPU as Clean), so no change there; the heavy
-state was the owner's own saved configuration.
+**rc2 on hardware [HW, owner-run, console read live by the lead]:**
+- Ran steadily: `stalls=0`, no CRASH/STALL; threads: audio 60 %, USB/other 21 %, main 1.4 %,
+  idle 17 %.
+- The owner's "crash" was the 1.5 s FN-hold power off firing during FN + rocker.
+- **Controls dead for whole boots**: no control events after `adc_to=1`.
+  - Cause in our code [SRC]: rc2's async SAADC read never restarted a scan that did not
+    complete.
+  - Why the SAADC lost a conversion is not known. It is consistent with rc1's blocking
+    `adc_read` hangs.
+- Overload guard shed slots 0, 1, 3 after one 114 % window and stayed latched (effects
+  silent).
+- Heavy saved state: engine 48 % average, whole block 73 % average, window max 94-114 %.
 
-rc3 changes [HOST]: power off needs FN held **alone** for 3 s (was 1.5 s) with a 4-LED
-countdown in the last second; any other button pressed during the same FN press (rocker,
-channel, PLAY, VOL) cancels it for that press (rc2 only cancelled from the rocker press on;
-VOL did not cancel at all). Wake from power off = next FN press into the TE bootloader
-(unchanged, intended). Tests: countdown, 3 s threshold, the owner's sequence (FN, 1.2 s,
-rocker tap, FN 3 s more: no power off), FN + rocker auto-repeat, FN + VOL/channel/PLAY.
+**rc3 changes:**
+- Register-level, interrupt-free, self-restarting SAADC scanner that cleans up the
+  bootloader's SAADC/PPI state [HOST state machine; driver UNTESTED]. Plus `B` button lines
+  and a 2 s `ctl` line (alive counters, scan age, raw ladders/faders, FN/gesture state)
+  [UNTESTED].
+- FN power on/off = 4 s hold with an 8-LED fill (0.5 s per LED, PLAY-side then T1-T4, nothing
+  before 0.5 s). Any other button in the same FN press cancels it (rc2: VOL did not;
+  FN-then-rocker only from the rocker press) [HOST].
+- Power on is implemented in the app after the bootloader hands over (Tape Looper's
+  charge-standby design, MIT, shipped on this hardware). FN or USB wake goes to standby,
+  watchdog/crash recovery and power-on start at once [HOST decision logic; UNTESTED on
+  hardware, in particular whether the TE bootloader preserves RESETREAS OFF/VBUS (it preserved
+  DOG in rc1/rc2)].
+- Charger [SRC]: /CE P0.21 now driven low (charging enabled; earlier images never touched it),
+  /CHG P0.22 and /PGOOD P0.24 read; battery divider AIN4 P0.28 scanned (`batt_raw=`,
+  uncalibrated). USB into an off unit: no start, charge pulse on one LED. Power off while
+  plugged: soft reset into the charge display. Charging while running: dim blip on PLAY LED 4,
+  `info`, companion METERS flags [UNTESTED].
+- Overload guard [HOST]:
+  - judges engine cycles, not whole-block time (USB/other overhead averaged ~25 % on the
+    device);
+  - the safety net needs 2 windows over 9/8 in a row;
+  - blocks during flash writes are skipped;
+  - auto-recovery after ~10 s calm, one slot at a time, back-off x2 per repeat (max x16);
+  - shed slots blink at 1 Hz;
+  - METERS flags carry the shed mask / forced bypass / USB power / charging (spec updated,
+    companion shows them);
+  - `D` line shows `win_max_period=`.
+- First boot without saved settings is already pass-through (all slots bypassed, not
+  processed), so no change there; the heavy state was the owner's saved configuration [SRC].
 
 ## v1-rc2 (2026-11-24): rc1 watchdog-reset fixes
 
@@ -233,7 +259,7 @@ Next: owner runs fxprof -> replace the declared values with measured ones.
 - Minimal image: when USB is plugged in, FN-hold enters SYSTEM_OFF and the device may stay dark until FN is pressed or USB is replugged (Tape Looper soft-resets instead). Pins, PWM ownership of the LED pin, and watchdog-channel assumptions are unverified guesses from Tape Looper's source.
 
 ## Hardware log (owner-reported; no automated evidence)
-- 2026-11-24 (owner-run, console read live by the lead): `sp1fx-v1-rc2.bin` runs steadily (stalls=0, no crash); FN-hold power off (1.5 s) fired by accident while cycling presets -> rc3.
+- 2026-11-24 (owner-run, console read live by the lead): `sp1fx-v1-rc2.bin` runs steadily (stalls=0, no crash); FN-hold power off (1.5 s) fired by accident while cycling presets; controls dead in some boots after a SAADC scan timeout; overload guard shed and stayed latched -> rc3.
 - 2026-11-24 (owner-run, console read by the lead): `sp1fx-v1-rc1.bin` resets by watchdog every ~6-20 s (see "v1-rc2" at the top). Superseded by rc2 (not yet run).
 - 2026-11-24: `sp1fx-min-heartbeat.bin` (SHA-256 18afab48...592667) flashed with Solderless to the spare unit; LED 1 blinks. This confirms: bootloader accepts an app linked at 0x20000, our reset/vector layout is valid, LED pin P0.29 is right.
 - 2026-11-24: `sp1fx-tone.bin` (SHA-256 87886d14...433f9): owner reports left channel low tone, right channel high tone, "sounds great". This confirms (owner-observed) the CS42L42/TAS2505 init, I2S slave clocking from the 3.072 MHz oscillator, and channel order. Not yet reported: which output was heard (speaker vs headphones), LEDs 2-4, serial status line, speaker mute on headphone insert, pop-free switching.

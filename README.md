@@ -35,7 +35,7 @@ Text summary of the controls, for readers who cannot see the image:
 - **FN + T1-T4:** enter edit mode for that slot. **Tap FN again** to return to performance mode.
 - **FN + FWD/REV:** previous or next preset. Holding repeats.
 - **PLAY tap:** global bypass. A single LED walks across the track LEDs while bypassed.
-- **FN hold 3 s (alone):** power off; the PLAY-side LEDs fill up during the last second. Pressing any other button during the hold cancels it. (1.5 s in the older images; the guide image still says 1.5 s, the HTML source is updated.)
+- **FN hold 4 s (alone):** power on and power off (integrated firmware rc3). The 8 LEDs fill one per 0.5 s (PLAY-side LEDs, then T1-T4). Pressing any other button during the hold cancels it. Plugging in USB does not switch the unit on; it charges and shows the charge state. (Older images: 1.5 s. The guide image still says 1.5 s; the HTML source is updated.)
 - **VOL- / VOL+:** master volume, 2 dB per press (-60 to 0 dB), shown as a bar on the PLAY-side LEDs. Holding repeats. Saved. (The guide image still says 16 steps; the HTML source is updated.)
 - **Soft takeover:** when a fader changes role, its value does not jump. Its LED blinks while you move it toward the stored value. A bright flash on a dim base means move up. A bright blink with a dark gap means move down. A steady LED means picked up.
 - **LEDs beside PLAY:** output level, or a flashing row when a change is refused (for example, an effect that does not fit the DSP memory or CPU budget).
@@ -147,7 +147,7 @@ Staged images are kept outside the repository, in `~/spfx/flash-ready/`. They ar
 | `sp1fx-usbaudio-in-v3.bin` | USB audio in, A, v3 (optimised DSP, overload guard). Runs on the owner's unit (presets ~50 % CPU). |
 | `sp1fx-v1-rc1.bin` | Integrated firmware rc1. **Resets by watchdog on hardware.** Superseded. |
 | `sp1fx-v1-rc2.bin` | Integrated firmware rc2 (reset fixes + stall recorder). Ran on the owner's unit; FN-hold power off too easy to hit. Superseded. |
-| `sp1fx-v1-rc3.bin` | **Integrated firmware rc3**: power off needs FN alone for 3 s with an LED countdown. Not run on hardware yet. Test plan: `docs/BRINGUP_SP1FX.md`. |
+| `sp1fx-v1-rc3.bin` | **Integrated firmware rc3**: controls fix (own SAADC scan), 4 s FN power on/off with 8-LED fill, charge standby, overload guard recovery. Not run on hardware yet. Test plan: `docs/BRINGUP_SP1FX.md`. |
 | `RECOVERY-tape-looper-from-repo.bin` | Tape Looper release, recovery only. Not built from this repository. |
 
 Bring-up procedures and pass/fail checklists are in `docs/BRINGUP_SP1FX.md` (integrated firmware), `docs/BRINGUP_TONE.md`, `docs/BRINGUP_CONTROLS.md`, `docs/BRINGUP_SYNC.md` and `docs/BRINGUP_USBAUDIO.md`.
