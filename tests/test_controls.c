@@ -308,8 +308,17 @@ static void test_led_select_and_edit(void)
 	hold(B(BTN_T3), 24);
 	CHECK(eng.cfg.fx_id[2] == FX_REVERB);
 	controller_leds(&ui, T, &f);
-	/* effect number 4 in binary on the PLAY-side LEDs: 0b0100 */
-	CHECK(f.play[0] == 0 && f.play[1] == 0 && f.play[2] == 255 && f.play[3] == 0);
+	/* no numbers: a just-completed change flashes all four PLAY-side LEDs ... */
+	CHECK(f.play[0] == 255 && f.play[1] == 255 && f.play[2] == 255 && f.play[3] == 255);
+	/* ... and the held channel's own LED is lit */
+	CHECK(f.track[2] > 0);
+	/* once the flash is over they go dark (effect is not None) */
+	controller_leds(&ui, T + 400, &f);
+	CHECK(f.play[0] == 0 && f.play[3] == 0);
+	/* None is recognisable: steady dim row */
+	ui.cursor[2] = FX_NONE;
+	controller_leds(&ui, T + 400, &f);
+	CHECK(f.play[0] == 14 && f.play[3] == 14);
 	hold(0, 40);
 	/* edit mode: PLAY-side LEDs show the slot one-hot, not the meter */
 	hold(B(BTN_FN), 40); hold(B(BTN_FN) | B(BTN_T2), 40); hold(B(BTN_FN), 40); hold(0, 40);

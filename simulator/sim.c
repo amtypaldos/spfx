@@ -50,6 +50,36 @@ static void list(void)
 	}
 }
 
+static void json_str(const char *s)
+{
+	putchar('"');
+	for (; s && *s; s++) { if (*s == '"' || *s == '\\') putchar('\\'); putchar(*s); }
+	putchar('"');
+}
+
+/* machine-readable effect table for the companion app and tools */
+static void list_json(void)
+{
+	printf("[\n");
+	for (int i = 0; i < FX_COUNT; i++) {
+		const fx_desc *d = fx_get(i);
+		printf("  {\"id\": %d, \"name\": ", i); json_str(d->name);
+		printf(", \"cpuCycles\": %u, \"memBytes\": %u, \"tailMs\": %u, \"mixMode\": \"%s\", \"params\": [",
+		       d->cpu_cycles, (unsigned)fx_align8(d->mem_bytes), (unsigned)d->tail_ms, d->mix_mode == FX_MIX_SEND ? "send" : "crossfade");
+		for (int p = 0; p < d->nparams; p++) {
+			const fx_param_desc *q = &d->params[p];
+			printf("%s{\"name\": ", p ? ", " : ""); json_str(q->name);
+			printf(", \"unit\": "); json_str(q->unit);
+			printf(", \"min\": %g, \"max\": %g, \"def\": %g, \"scale\": \"%s\"", q->min, q->max, q->def,
+			       q->scale == FX_SCALE_LOG ? "log" : (q->scale == FX_SCALE_STEP ? "step" : "lin"));
+			if (q->labels) { printf(", \"labels\": "); json_str(q->labels); }
+			printf("}");
+		}
+		printf("]}%s\n", i + 1 < FX_COUNT ? "," : "");
+	}
+	printf("]\n");
+}
+
 static double now_s(void)
 {
 	struct timespec t;
@@ -60,6 +90,7 @@ static double now_s(void)
 int main(int argc, char **argv)
 {
 	if (argc >= 2 && !strcmp(argv[1], "--list")) { list(); return 0; }
+	if (argc >= 2 && !strcmp(argv[1], "--list-json")) { list_json(); return 0; }
 	if (argc < 3) {
 		fprintf(stderr, "usage: %s --list | in.wav out.wav [--slot N=effect] [--param N.P=value] [--wet N=0..1]\n"
 		                "       [--bypass N] [--tail sec] [--block n] [--pool KB] [--bits 16|24|32] [--bench]\n", argv[0]);

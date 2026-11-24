@@ -11,7 +11,9 @@ Evidence key: **[HOST]** verified by automated tests on a development Mac. **[SR
 | Simulator (`simulator/`) | WAV in/out through the real engine, `--list`, `--bench`. **[HOST]** |
 | Config sanitising (`engine_config_sanitize`) | repairs corrupt configs. **[HOST]** Binary storage/journal: **[TODO]** |
 | USB audio in/out, I2S, codec drivers, ladder decode, LED PWM | **[TODO]** (reuse Tape Looper drivers, MIT) |
-| Protocol, companion, presets, persistence | **[TODO]** |
+| Persistence (`firmware/storage`) | versioned record + two-page power-loss-safe journal, write debounce. **[HOST]** |
+| Protocol spec (`docs/PROTOCOL.md`) | written; firmware side **[TODO]**. Companion app and guide graphic: in progress (subagents) |
+| Presets (factory) | **[TODO]** |
 
 ## Test results (`make test`, last run: all pass)
 - `test_dsp`: 2,382 checks. Parameter map/unmap, silence, 16 parameter corners x every effect with loud noise, automation stability, stereo isolation, filter frequency response (LP/HP), delay timing exact to the sample, feedback ratio, reverb decay, chorus delay, tremolo depth, compressor level, fast-math accuracy, recovery after NaN.

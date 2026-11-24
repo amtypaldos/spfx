@@ -167,14 +167,14 @@ void controller_leds(const controller_t *c, uint32_t now, led_frame_t *o)
 		int slot = c->held_slot;
 		int idx = c->cursor[slot];
 		o->track[slot] = clamp8(110.0f + 145.0f * tri(now, 400));
-		/* effect number in binary on the four PLAY-side LEDs; None = dim all */
-		if (idx == FX_NONE) {
+		/* No effect numbers (user decision, ADR-002): the PLAY-side LEDs only confirm that
+		 * something happened. A successful change flashes all four; "None" shows a steady dim
+		 * row so an emptied slot is recognisable; otherwise they stay dark. */
+		if (now < c->flash_until) {
+			for (int i = 0; i < 4; i++) o->play[i] = 255;
+		} else if (idx == FX_NONE) {
 			for (int i = 0; i < 4; i++) o->play[i] = 14;
-		} else {
-			for (int i = 0; i < 4; i++) o->play[i] = (idx >> i) & 1 ? 255 : 0;
 		}
-		if (now < c->flash_until)
-			for (int i = 0; i < 4; i++) if (i != slot) o->track[i] = 0;
 		if (now < c->err_until) {
 			int ph = (int)((now / 80u) & 1u);
 			for (int i = 0; i < 4; i++) o->play[i] = ((i & 1) == ph) ? 255 : 0;
