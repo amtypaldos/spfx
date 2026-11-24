@@ -260,6 +260,80 @@ static void test_spare_pre_erase(void)
 	  store_t r2; store_init(&r2, ops()); CHECK(store_load(&r2, &out) == 0 && same(&out, &n2)); }
 }
 
+/* rc4: out_mode rides in a journal extension byte after the v1 payload; records without it
+ * (all earlier firmware) read as headphones; the STATE payload (store_encode) is unchanged */
+static void test_out_mode_extension(void)
+{
+	blank();
+	store_t s; store_data_t d = sample(1), out;
+	store_init(&s, ops());
+	CHECK(store_save(&s, &d) == 0);
+	{ store_t r; store_init(&r, ops()); CHECK(store_load(&r, &out) == 0 && same(&out, &d) && out.out_mode == 0); }
+	d.out_mode = 1;
+	CHECK(store_save(&s, &d) == 0);
+	{ store_t r; store_init(&r, ops()); CHECK(store_load(&r, &out) == 0 && same(&out, &d) && out.out_mode == 1); }
+	/* an old-format record (exactly the v1 payload, no extension) -> headphones */
+	uint8_t pl[STORE_RECORD_BYTES];
+	uint16_t n = store_encode(&d, pl, sizeof pl);
+	CHECK(n == store_payload_len());
+	store_data_t back;
+	CHECK(store_decode(pl, n, STORE_LAYOUT_VERSION, &back) == 0 && back.out_mode == 0);
+	/* hand-written old record in a fresh journal */
+	blank();
+	uint8_t rec[STORE_RECORD_BYTES];
+	memset(rec, 0xFF, sizeof rec);
+	uint32_t magic = 0x58463153u, seq = 5;
+	memcpy(rec, &magic, 4);
+	rec[4] = 1; rec[5] = 0; rec[6] = (uint8_t)n; rec[7] = (uint8_t)(n >> 8);
+	memcpy(rec + 8, &seq, 4);
+	memcpy(rec + 12, pl, n);
+	uint32_t crc = sp1fx_crc32(rec, 12u + n);
+	memcpy(rec + 12 + n, &crc, 4);
+	memcpy(M.page[0], rec, sizeof rec);
+	{ store_t r; store_init(&r, ops()); CHECK(store_load(&r, &out) == 0 && out.out_mode == 0 && same(&out, &d)); }
+	/* defaults */
+	store_data_default(&out);
+	CHECK(out.out_mode == 0);
+}
+
+/* rc4: a save programmed a few bytes per control tick; a power cut anywhere in it keeps the
+ * previous record; finishing it equals store_save */
+static void test_save_job_steps(void)
+{
+	blank();
+	store_t s; store_data_t a = sample(3), b = sample(4), out;
+	store_init(&s, ops());
+	CHECK(store_save(&s, &a) == 0);
+	static store_job_t j;
+	CHECK(store_job_begin(&s, &b, &j) == 0 && j.active && j.total <= STORE_RECORD_BYTES && (j.total & 3u) == 0);
+	int steps = 0, r;
+	while ((r = store_job_step(&s, &j, 32)) == 0) {
+		steps++;
+		/* "power cut" after every step: a fresh boot still loads the previous record */
+		store_t q; store_init(&q, ops());
+		CHECK(store_load(&q, &out) == 0 && same(&out, &a));
+	}
+	CHECK(r == 1 && steps >= (int)(j.total / 32u) - 1);
+	{ store_t q; store_init(&q, ops()); CHECK(store_load(&q, &out) == 0 && same(&out, &b) && q.seq == 2); }
+	/* an abandoned job: the next save skips the torn slot and works */
+	CHECK(store_job_begin(&s, &a, &j) == 0);
+	CHECK(store_job_step(&s, &j, 64) == 0);
+	{
+		store_t q; store_init(&q, ops());
+		CHECK(store_load(&q, &out) == 0 && same(&out, &b));
+		store_data_t c = sample(5);
+		CHECK(store_save(&q, &c) == 0);
+		store_t q2; store_init(&q2, ops());
+		CHECK(store_load(&q2, &out) == 0 && same(&out, &c));
+	}
+	/* stepping a finished job is an error, never a write */
+	store_t q3; store_init(&q3, ops());
+	CHECK(store_job_begin(&q3, &a, &j) == 0);
+	while (store_job_step(&q3, &j, 400) == 0) {}
+	uint32_t w0 = M.writes;
+	CHECK(store_job_step(&q3, &j, 32) == -3 && M.writes == w0);
+}
+
 static void test_corruption(void)
 {
 	blank();
@@ -337,6 +411,8 @@ int main(void)
 	RUN(test_power_loss_during_write);
 	RUN(test_power_loss_during_erase);
 	RUN(test_spare_pre_erase);
+	RUN(test_out_mode_extension);
+	RUN(test_save_job_steps);
 	RUN(test_corruption);
 	RUN(test_write_failure_then_rescan);
 	RUN(test_debounce);

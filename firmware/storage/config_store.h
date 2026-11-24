@@ -23,6 +23,9 @@ typedef struct {
 	engine_config_t cfg;
 	float bpm; /* 30..300 */
 	uint8_t sync_on; /* sync-jack clock running; saved and restored at power-up */
+	uint8_t out_mode; /* headphone jack: 0 headphones (default), 1 line out (rc4). Kept in a
+	                   * journal extension byte AFTER the v1 payload, not in store_encode()
+	                   * (the protocol STATE carries it separately). */
 } store_data_t;
 
 /* page_index is 0 or 1 (the two journal pages). Offsets are relative to the page. */
@@ -48,6 +51,7 @@ void store_data_default(store_data_t *d);
 
 /* Serialisation (exposed for tests and for the companion protocol). */
 uint16_t store_encode(const store_data_t *d, uint8_t *payload, uint16_t cap);
+uint16_t store_payload_len(void); /* bytes store_encode() writes (v1 layout) */
 int store_decode(const uint8_t *payload, uint16_t len, uint16_t layout_version, store_data_t *out); /* 0 ok */
 
 int store_init(store_t *s, flash_ops_t ops);
@@ -55,6 +59,21 @@ int store_init(store_t *s, flash_ops_t ops);
 int store_load(store_t *s, store_data_t *out);
 /* 0 ok, <0 flash error (state stays recoverable; the next save rescans) */
 int store_save(store_t *s, const store_data_t *d);
+
+/* The same save in steps (rc4): begin builds the record and picks its slot (and erases a page
+ * if that is unavoidable: check store_save_needs_erase() first); each step programs at most
+ * max_bytes (multiple of 4) and returns 0 = more to do, 1 = done (record valid and current),
+ * <0 = flash error. A job that is never finished (power cut, reset) leaves a torn slot that the
+ * journal skips; the previous record stays the newest valid one. Only one job at a time, and
+ * no other store_* write call while it is active. */
+typedef struct {
+	uint8_t rec[STORE_RECORD_BYTES];
+	int page, slot, switched, active;
+	uint32_t seq;
+	uint16_t total, done;
+} store_job_t;
+int store_job_begin(store_t *s, const store_data_t *d, store_job_t *j);
+int store_job_step(store_t *s, store_job_t *j, uint32_t max_bytes);
 
 /* ---- erase scheduling (a page erase stalls the nRF52 CPU ~85 ms; see ADR-003) ----
  * A save normally only appends a record (no erase). It erases a page only (a) on the very

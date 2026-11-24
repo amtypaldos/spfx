@@ -36,13 +36,19 @@ void store_data_default(store_data_t *d)
 	engine_config_default(&d->cfg);
 	d->bpm = 120.0f;
 	d->sync_on = 0;
+	d->out_mode = 0;
+}
+
+uint16_t store_payload_len(void)
+{
+	return (uint16_t)(15 + 2 + 2 + 2 + 8 + ENGINE_SLOTS * FX_COUNT * FX_MAX_PARAMS * 2);
 }
 
 /* layout: fx_id[4] bypass[4] order[4] global sync_on fx_count | in_gain_cdB(i16) master bpm_x10 | wet[4] | params[4][fx_count][4] */
 uint16_t store_encode(const store_data_t *d, uint8_t *p, uint16_t cap)
 {
-	uint16_t need = (uint16_t)(15 + 2 + 2 + 2 + 8 + ENGINE_SLOTS * FX_COUNT * FX_MAX_PARAMS * 2);
-	if (cap < need) return 0;
+	uint16_t need = store_payload_len();
+	if (!p || cap < need) return 0;
 	uint8_t *w = p;
 	for (int s = 0; s < ENGINE_SLOTS; s++) *w++ = d->cfg.fx_id[s];
 	for (int s = 0; s < ENGINE_SLOTS; s++) *w++ = d->cfg.bypass[s];
@@ -108,7 +114,13 @@ static int read_record(store_t *s, int page, int slot, uint32_t *seq_out, store_
 	if (crc32(rec, HDR_BYTES + len) != get32(rec + HDR_BYTES + len)) return 0;
 	uint32_t seq = get32(rec + 8);
 	if (seq == 0 || seq == 0xFFFFFFFFu) return 0;
-	if (data && store_decode(rec + HDR_BYTES, len, ver, data) != 0) return 0;
+	if (data) {
+		if (store_decode(rec + HDR_BYTES, len, ver, data) != 0) return 0;
+		/* extension: out_mode right after the v1 payload, if the record has it */
+		const uint32_t fxn = rec[HDR_BYTES + 14]; /* the record's own fx_count */
+		const uint32_t base = 15u + 6u + 8u + (uint32_t)ENGINE_SLOTS * fxn * FX_MAX_PARAMS * 2u;
+		data->out_mode = (len > base && rec[HDR_BYTES + base] == 1) ? 1 : 0;
+	}
 	if (seq_out) *seq_out = seq;
 	return 1;
 }
@@ -170,15 +182,18 @@ int store_load(store_t *s, store_data_t *out)
 	return -1;
 }
 
-int store_save(store_t *s, const store_data_t *d)
+int store_job_begin(store_t *s, const store_data_t *d, store_job_t *j)
 {
+	j->active = 0;
 	if (s->need_rescan) scan(s);
 
-	uint8_t rec[STORE_RECORD_BYTES];
-	memset(rec, 0xFF, sizeof rec);
+	uint8_t *rec = j->rec;
+	memset(rec, 0xFF, STORE_RECORD_BYTES);
 	uint8_t payload[STORE_RECORD_BYTES - HDR_BYTES - 4];
 	uint16_t len = store_encode(d, payload, sizeof payload);
-	if (!len) return -2;
+	if (!len || len >= sizeof payload) return -2;
+	/* extension bytes after the v1 payload (older firmware ignores them, see read_record) */
+	payload[len++] = d->out_mode == 1 ? 1 : 0;
 
 	int page = s->active_page, slot = s->next_slot;
 	if (page < 0) {
@@ -192,25 +207,53 @@ int store_save(store_t *s, const store_data_t *d)
 		page = 1 - page; slot = 0;
 		if (!page_blank(s, page) && s->f.erase(s->f.ctx, (uint32_t)page) != 0) { s->need_rescan = 1; return -1; }
 	}
-	int switched = page != s->active_page;
-
-	uint32_t seq = s->seq + 1;
+	j->switched = page != s->active_page;
+	j->page = page;
+	j->slot = slot;
+	j->seq = s->seq + 1;
 	put32(rec, MAGIC);
 	put16(rec + 4, STORE_LAYOUT_VERSION);
 	put16(rec + 6, len);
-	put32(rec + 8, seq);
+	put32(rec + 8, j->seq);
 	memcpy(rec + HDR_BYTES, payload, len);
 	put32(rec + HDR_BYTES + len, crc32(rec, HDR_BYTES + len));
+	/* only the used part is programmed; the rest of the slot stays erased (0xFF) */
+	j->total = (uint16_t)((HDR_BYTES + len + 4u + 3u) & ~3u);
+	j->done = 0;
+	j->active = 1;
+	return 0;
+}
 
-	if (s->f.write(s->f.ctx, (uint32_t)page, (uint32_t)slot * STORE_RECORD_BYTES, rec, STORE_RECORD_BYTES) != 0) {
+int store_job_step(store_t *s, store_job_t *j, uint32_t max_bytes)
+{
+	if (!j->active) return -3;
+	uint32_t n = j->total - j->done;
+	if (max_bytes < n) n = max_bytes & ~3u;
+	if (n == 0) n = 4;
+	if (n > (uint32_t)(j->total - j->done)) n = j->total - j->done;
+	if (s->f.write(s->f.ctx, (uint32_t)j->page, (uint32_t)j->slot * STORE_RECORD_BYTES + j->done,
+		       j->rec + j->done, n) != 0) {
 		s->need_rescan = 1; /* may be torn; the next save re-reads flash before trusting cached state */
+		j->active = 0;
 		return -1;
 	}
-	s->seq = seq;
-	s->active_page = page;
-	s->next_slot = slot + 1;
-	if (switched) s->spare_blank = -1; /* the old page (now spare) holds older records */
-	return 0;
+	j->done = (uint16_t)(j->done + n);
+	if (j->done < j->total) return 0;
+	s->seq = j->seq;
+	s->active_page = j->page;
+	s->next_slot = j->slot + 1;
+	if (j->switched) s->spare_blank = -1; /* the old page (now spare) holds older records */
+	j->active = 0;
+	return 1;
+}
+
+int store_save(store_t *s, const store_data_t *d)
+{
+	static store_job_t job; /* single control thread; keeps 0.5 KB off the stack */
+	int r = store_job_begin(s, d, &job);
+	if (r != 0) return r;
+	while ((r = store_job_step(s, &job, STORE_RECORD_BYTES)) == 0) {}
+	return r == 1 ? 0 : r;
 }
 
 int store_save_needs_erase(store_t *s)
