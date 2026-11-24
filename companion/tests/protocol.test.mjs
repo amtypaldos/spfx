@@ -242,12 +242,15 @@ test('RESULT, EVENT, ADMISSION_ERROR, METERS round trip', () => {
     for (const k of Object.keys(g)) { if (k === 'v') assert.ok(near(e.setter.v, g.v)); else assert.deepEqual(e.setter[k], g[k]); }
   }
   assert.throws(() => decodePayload(T.EVENT, bytes(T.HELLO)), ProtocolError);   // events carry setters only
-  const mt = { type: T.METERS, inPeak: 32768, outPeak: 1000, cpuPct: 63, cpuPeakPct: 80, memUsed: 119920, inClips: 1, outClips: 2, underruns: 3, overruns: 4, nanEvents: 5, uiMode: 1, editSlot: 3, globalBypass: true, usbPower: true, charging: false, guardForced: false, guardShed: 0b1011 };
+  const mt = { type: T.METERS, inPeak: 32768, outPeak: 1000, cpuPct: 63, cpuPeakPct: 80, memUsed: 119920, inClips: 1, outClips: 2, underruns: 3, overruns: 4, nanEvents: 5, uiMode: 1, editSlot: 3, globalBypass: true, usbPower: true, charging: false, guardForced: false, guardShed: 0b1011, battPct: 62 };
   assert.deepEqual(decodePayload(T.METERS, encodePayload(mt)), mt);
   // firmware before v1-rc3 sends flags = bit0 only: the new fields read as off
   const old = encodePayload({ ...mt, usbPower: false, guardShed: 0 });
   const d0 = decodePayload(T.METERS, old);
   assert.equal(d0.usbPower || d0.charging || d0.guardForced || d0.guardShed !== 0, false);
+  // firmware before rc6: no battery byte -> null; 255 -> null
+  assert.equal(decodePayload(T.METERS, old.subarray(0, old.length - 1)).battPct, null);
+  assert.equal(decodePayload(T.METERS, encodePayload({ ...mt, battPct: null })).battPct, null);
   assert.equal(decodePayload(T.METERS, encodePayload({ ...mt, globalBypass: false })).globalBypass, false);
 });
 

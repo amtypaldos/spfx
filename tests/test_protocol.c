@@ -795,6 +795,7 @@ static void test_subscribe_timing(void)
 }
 
 static uint8_t test_power_flags(void *ctx) { (void)ctx; return 0xFF; } /* only bits 1-2 may pass */
+static uint8_t test_batt(void *ctx) { (void)ctx; return 62; }
 
 static uint8_t hc_types[16];
 static int hc_n;
@@ -850,7 +851,7 @@ static void test_meters_content(void)
 	proto_tick(&pr, T);
 	for (int s = 0; s < 4; s++) eng.blk_size[s] = saved[s];
 	const frm_t *m = last_of(PT_METERS);
-	CHECK(m && m->seq == 0 && m->len == 33);
+	CHECK(m && m->seq == 0 && m->len == 34); /* + battery byte (rc6) */
 	if (!m) return;
 	CHECK(raw_equals(m, g_meters, sizeof g_meters));
 	const uint8_t *p = m->pay;
@@ -881,6 +882,13 @@ static void test_meters_content(void)
 	proto_tick(&pr, T + 180);
 	m = last_of(PT_METERS);
 	CHECK(m && m->pay[32] == (1u | 2u | 4u | 8u | 0xB0u));
+	CHECK(m && m->pay[33] == 255u);   /* no battery callback: unknown */
+	pr.c.batt_pct = test_batt;
+	clear_tx();
+	proto_tick(&pr, T + 240);
+	m = last_of(PT_METERS);
+	CHECK(m && m->len == 34 && m->pay[33] == 62u);
+	pr.c.batt_pct = NULL;
 	eng.diag.shed_mask = 0;
 	eng.diag.forced_bypass = 0;
 	pr.c.power_flags = NULL;

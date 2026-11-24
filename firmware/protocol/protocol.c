@@ -563,6 +563,7 @@ static void send_meters(proto_t *p)
 	if (e->diag.forced_bypass) fl |= 8u;
 	fl |= (uint32_t)(e->diag.shed_mask & 15u) << 4;
 	w8(&w, fl);
+	w8(&w, p->c.batt_pct ? p->c.batt_pct(p->c.ctx) : 255u); /* rc6: battery %, 255 unknown */
 	send(p, PT_METERS, 0, w.p, w.n);
 }
 

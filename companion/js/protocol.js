@@ -214,7 +214,8 @@ export function encodePayload(msg) {
       w.u16(msg.inPeak).u16(msg.outPeak).u8(msg.cpuPct).u8(msg.cpuPeakPct).u32(msg.memUsed)
         .u32(msg.inClips).u32(msg.outClips).u32(msg.underruns).u32(msg.overruns).u32(msg.nanEvents)
         .u8(msg.uiMode).u8(msg.editSlot)
-        .u8((msg.globalBypass ? 1 : 0) | (msg.usbPower ? 2 : 0) | (msg.charging ? 4 : 0) | (msg.guardForced ? 8 : 0) | (((msg.guardShed ?? 0) & 15) << 4));
+        .u8((msg.globalBypass ? 1 : 0) | (msg.usbPower ? 2 : 0) | (msg.charging ? 4 : 0) | (msg.guardForced ? 8 : 0) | (((msg.guardShed ?? 0) & 15) << 4))
+        .u8(Number.isInteger(msg.battPct) && msg.battPct >= 0 && msg.battPct <= 100 ? msg.battPct : 255);
       break;
     default: throw new ProtocolError(`cannot encode type 0x${(msg.type >>> 0).toString(16)}`);
   }
@@ -280,6 +281,9 @@ export function decodePayload(type, payload) {
         const fl = r.u8();
         Object.assign(m, { globalBypass: (fl & 1) === 1, usbPower: (fl & 2) !== 0, charging: (fl & 4) !== 0,
           guardForced: (fl & 8) !== 0, guardShed: fl >> 4 });
+        // firmware v1-rc6+: battery percent (255 unknown); older firmware: absent
+        const b = r.more() ? r.u8() : 255;
+        m.battPct = b <= 100 ? b : null;
       }
       break;
     default: throw new ProtocolError(`unknown message type 0x${type.toString(16)}`);

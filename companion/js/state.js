@@ -65,6 +65,7 @@ export function applyMeters(m, x) {
     inPeak: x.inPeak, outPeak: x.outPeak, cpuPct: x.cpuPct, cpuPeakPct: x.cpuPeakPct, memUsed: x.memUsed,
     inClips: x.inClips, outClips: x.outClips, underruns: x.underruns, overruns: x.overruns, nanEvents: x.nanEvents,
     usbPower: !!x.usbPower, charging: !!x.charging, guardForced: !!x.guardForced, guardShed: x.guardShed ?? 0,
+    battPct: Number.isInteger(x.battPct) ? x.battPct : null,
   });
   m.globalBypass = x.globalBypass;
   m.uiMode = x.uiMode; m.editSlot = x.editSlot;

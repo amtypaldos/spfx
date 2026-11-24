@@ -240,7 +240,8 @@ export function mountUI({ store, ctl, library, env }) {
     const live = m.synced;
     const dash = '—';
     $('tFw').textContent = live ? (m.fw || dash) : dash;
-    const pwr = m.meters.charging ? ' · charging' : m.meters.usbPower ? ' · USB power' : '';
+    const bp = Number.isInteger(m.meters.battPct) ? ` · battery ~${m.meters.battPct} %` : '';
+    const pwr = (m.meters.charging ? ' · charging' : m.meters.usbPower ? ' · USB power' : '') + bp;
     $('tFwSub').textContent = live ? `protocol v${m.proto}${m.mode === 'demo' ? ' · simulated' : ''}${pwr}` : 'protocol —';
     const q = m.meters;
     $('tCpu').textContent = live ? `${q.cpuPct} %` : dash;

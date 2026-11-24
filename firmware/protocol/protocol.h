@@ -86,6 +86,8 @@ typedef struct {
 	void (*on_host_change)(void *ctx, uint8_t type);
 	/* optional: METERS flags bit1 USB power present, bit2 charging (return those bits) */
 	uint8_t (*power_flags)(void *ctx);
+	/* optional: battery 0..100 %, 255 unknown (METERS trailing byte, rc6) */
+	uint8_t (*batt_pct)(void *ctx);
 } proto_config_t;
 
 typedef struct {
