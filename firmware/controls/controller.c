@@ -27,6 +27,31 @@ static void changed(controller_t *c, uint32_t now)
 	c->last_change_ms = now;
 }
 
+static void push_ev(controller_t *c, uint8_t kind, int slot, int a, int b, float v)
+{
+	if (c->ev_count == CTL_EVENT_CAP) { /* drop oldest */
+		c->ev_head = (uint8_t)((c->ev_head + 1) % CTL_EVENT_CAP);
+		c->ev_count--;
+		c->ev_dropped++;
+	}
+	ctl_event_t *e = &c->ev[(c->ev_head + c->ev_count) % CTL_EVENT_CAP];
+	e->kind = kind;
+	e->slot = (uint8_t)slot;
+	e->a = (uint8_t)a;
+	e->b = (uint8_t)b;
+	e->v = v;
+	c->ev_count++;
+}
+
+int controller_pop_event(controller_t *c, ctl_event_t *out)
+{
+	if (c->ev_count == 0) return 0;
+	*out = c->ev[c->ev_head];
+	c->ev_head = (uint8_t)((c->ev_head + 1) % CTL_EVENT_CAP);
+	c->ev_count--;
+	return 1;
+}
+
 void controller_init(controller_t *c, engine_t *e)
 {
 	memset(c, 0, sizeof *c);
@@ -62,6 +87,7 @@ static void handle(controller_t *c, const gesture_event_t *ev, uint32_t now)
 	case GE_TOGGLE_BYPASS:
 		engine_set_bypass(e, ev->arg, !e->cfg.bypass[ev->arg]);
 		changed(c, now);
+		push_ev(c, CTL_EV_BYPASS, ev->arg, e->cfg.bypass[ev->arg], 0, 0.0f);
 		break;
 	case GE_CYCLE_FX: {
 		int slot = ev->arg;
@@ -74,9 +100,11 @@ static void handle(controller_t *c, const gesture_event_t *ev, uint32_t now)
 			c->flash_until = now + 250;
 			c->err_until = 0;
 			changed(c, now);
+			push_ev(c, CTL_EV_SLOT_FX, slot, next, 0, 0.0f);
 			if (c->mode == UI_EDIT && c->edit_slot == slot) rearm(c);
 		} else {
 			c->err_until = now + 700; /* previous assignment stays in force */
+			push_ev(c, CTL_EV_ADMISSION, slot, next, (int)st, 0.0f);
 		}
 		break;
 	}
@@ -94,6 +122,7 @@ static void handle(controller_t *c, const gesture_event_t *ev, uint32_t now)
 	case GE_GLOBAL_BYPASS:
 		engine_set_global_bypass(e, !e->cfg.global_bypass);
 		changed(c, now);
+		push_ev(c, CTL_EV_GLOBAL_BYPASS, 0, e->cfg.global_bypass, 0, 0.0f);
 		break;
 	case GE_VOL: {
 		float step = 1.0f / MASTER_STEPS;
@@ -102,6 +131,7 @@ static void handle(controller_t *c, const gesture_event_t *ev, uint32_t now)
 		v = roundf(v * MASTER_STEPS) / MASTER_STEPS;
 		engine_set_master(e, v);
 		changed(c, now);
+		push_ev(c, CTL_EV_MASTER, 0, 0, 0, e->cfg.master);
 		break;
 	}
 	case GE_POWER_OFF:
@@ -126,9 +156,14 @@ void controller_tick(controller_t *c, uint32_t now, uint16_t buttons, const floa
 			int id = c->eng->cfg.fx_id[c->edit_slot];
 			const fx_desc *d = fx_get(id);
 			if (!d || i >= d->nparams) continue;
+			float old = c->eng->cfg.params[c->edit_slot][id][i];
 			engine_set_param(c->eng, c->edit_slot, i, v);
+			float now_v = c->eng->cfg.params[c->edit_slot][id][i];
+			if (now_v != old) push_ev(c, CTL_EV_PARAM, c->edit_slot, i, 0, now_v);
 		} else {
+			float old = c->eng->cfg.wet[i];
 			engine_set_wet(c->eng, i, v);
+			if (c->eng->cfg.wet[i] != old) push_ev(c, CTL_EV_WET, i, 0, 0, c->eng->cfg.wet[i]);
 		}
 		changed(c, now);
 	}

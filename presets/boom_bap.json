@@ -1,0 +1,61 @@
+{
+  "schema": "sp1fx.preset",
+  "version": 1,
+  "name": "Boom Bap",
+  "inputGainDb": 0,
+  "master": 0.75,
+  "bpm": 90,
+  "order": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "globalBypass": false,
+  "slots": [
+    {
+      "fx": "saturation",
+      "bypass": false,
+      "wet": 0.5,
+      "params": [
+        0.3,
+        0.55,
+        0.5,
+        0.6111
+      ]
+    },
+    {
+      "fx": "bitcrusher",
+      "bypass": false,
+      "wet": 0.5,
+      "params": [
+        0.7333,
+        0.7991,
+        0.6,
+        0.6111
+      ]
+    },
+    {
+      "fx": "compressor",
+      "bypass": false,
+      "wet": 1.0,
+      "params": [
+        0.5,
+        0.4628,
+        0.5903,
+        0.458
+      ]
+    },
+    {
+      "fx": "reverb",
+      "bypass": false,
+      "wet": 0.2,
+      "params": [
+        0.2659,
+        0.3,
+        0.6,
+        0.05
+      ]
+    }
+  ]
+}

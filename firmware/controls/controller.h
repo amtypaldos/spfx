@@ -14,6 +14,26 @@ typedef struct {
 	uint8_t play[4];  /* four LEDs between PLAY and FUNCTION */
 } led_frame_t;
 
+/* Device-originated change events (additive API, consumed by the companion protocol).
+ * Filled wherever the controller changes state on its own; host-originated changes made
+ * directly through engine_* never appear here. */
+typedef enum {
+	CTL_EV_WET = 1,           /* slot, v */
+	CTL_EV_PARAM,             /* slot, a = param idx, v */
+	CTL_EV_BYPASS,            /* slot, a = on */
+	CTL_EV_SLOT_FX,           /* slot, a = fx id */
+	CTL_EV_GLOBAL_BYPASS,     /* a = on */
+	CTL_EV_MASTER,            /* v */
+	CTL_EV_ADMISSION          /* slot, a = rejected fx id, b = engine_status */
+} ctl_event_kind;
+
+typedef struct {
+	uint8_t kind, slot, a, b;
+	float v;
+} ctl_event_t;
+
+#define CTL_EVENT_CAP 32 /* ring; when full the oldest event is dropped and ev_dropped counts it */
+
 typedef struct {
 	engine_t *eng;
 	debounce_t deb;
@@ -33,6 +53,10 @@ typedef struct {
 	int power_off_request;
 	uint32_t change_seq; /* increments on any user-visible state change (companion / persistence) */
 	uint32_t last_change_ms;
+
+	ctl_event_t ev[CTL_EVENT_CAP];
+	uint8_t ev_head, ev_count;
+	uint32_t ev_dropped;
 } controller_t;
 
 void controller_init(controller_t *c, engine_t *e);
@@ -40,6 +64,8 @@ void controller_init(controller_t *c, engine_t *e);
 void controller_tick(controller_t *c, uint32_t now_ms, uint16_t buttons, const float fader[4]);
 /* Re-arm soft takeover after the state was changed from elsewhere (companion, preset load). */
 void controller_resync(controller_t *c);
+/* Pop the oldest device-originated event; returns 0 if none. */
+int controller_pop_event(controller_t *c, ctl_event_t *out);
 void controller_leds(const controller_t *c, uint32_t now_ms, led_frame_t *out);
 
 #define MASTER_STEPS 16

@@ -1,0 +1,61 @@
+{
+  "schema": "sp1fx.preset",
+  "version": 1,
+  "name": "Lo-Fi Tape",
+  "inputGainDb": 0,
+  "master": 0.75,
+  "bpm": 85,
+  "order": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "globalBypass": false,
+  "slots": [
+    {
+      "fx": "saturation",
+      "bypass": false,
+      "wet": 0.7,
+      "params": [
+        0.45,
+        0.4,
+        0.6667,
+        0.5
+      ]
+    },
+    {
+      "fx": "tape_wobble",
+      "bypass": false,
+      "wet": 1.0,
+      "params": [
+        0.45,
+        0.3,
+        0.3384,
+        0.25
+      ]
+    },
+    {
+      "fx": "bitcrusher",
+      "bypass": false,
+      "wet": 0.4,
+      "params": [
+        0.6,
+        0.7162,
+        0.45,
+        0.5556
+      ]
+    },
+    {
+      "fx": "filter",
+      "bypass": false,
+      "wet": 1.0,
+      "params": [
+        0.7841,
+        0.15,
+        0,
+        0.125
+      ]
+    }
+  ]
+}

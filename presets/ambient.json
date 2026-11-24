@@ -1,0 +1,61 @@
+{
+  "schema": "sp1fx.preset",
+  "version": 1,
+  "name": "Ambient",
+  "inputGainDb": 0,
+  "master": 0.75,
+  "bpm": 70,
+  "order": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "globalBypass": false,
+  "slots": [
+    {
+      "fx": "chorus",
+      "bypass": false,
+      "wet": 0.5,
+      "params": [
+        0.2808,
+        0.6,
+        0.2857,
+        1
+      ]
+    },
+    {
+      "fx": "delay",
+      "bypass": false,
+      "wet": 0.35,
+      "params": [
+        1,
+        0.5789,
+        0.65,
+        1
+      ]
+    },
+    {
+      "fx": "reverb",
+      "bypass": false,
+      "wet": 0.45,
+      "params": [
+        0.8901,
+        0.9,
+        0.4,
+        0.4
+      ]
+    },
+    {
+      "fx": "tremolo",
+      "bypass": false,
+      "wet": 0.5,
+      "params": [
+        0.5654,
+        0.25,
+        0.125,
+        0.5
+      ]
+    }
+  ]
+}

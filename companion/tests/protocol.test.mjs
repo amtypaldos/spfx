@@ -65,8 +65,8 @@ test('frame: encode/decode and layout', () => {
 });
 
 test('frame: payload limits', () => {
-  assert.doesNotThrow(() => encodeFrame({ type: 1, seq: 1, payload: new Uint8Array(250) }));
-  assert.throws(() => encodeFrame({ type: 1, seq: 1, payload: new Uint8Array(251) }), ProtocolError);
+  assert.doesNotThrow(() => encodeFrame({ type: 1, seq: 1, payload: new Uint8Array(500) }));
+  assert.throws(() => encodeFrame({ type: 1, seq: 1, payload: new Uint8Array(501) }), ProtocolError); // spec: payload 0..500
 });
 
 test('frame: corrupt frames are rejected (every single-bit flip)', () => {

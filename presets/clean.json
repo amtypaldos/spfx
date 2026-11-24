@@ -1,0 +1,61 @@
+{
+  "schema": "sp1fx.preset",
+  "version": 1,
+  "name": "Clean",
+  "inputGainDb": 0,
+  "master": 0.75,
+  "bpm": 120,
+  "order": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "globalBypass": false,
+  "slots": [
+    {
+      "fx": "filter",
+      "bypass": true,
+      "wet": 0.5,
+      "params": [
+        0.625,
+        0.4,
+        0,
+        0.125
+      ]
+    },
+    {
+      "fx": "chorus",
+      "bypass": true,
+      "wet": 0.5,
+      "params": [
+        0.5316,
+        0.5,
+        0,
+        0.7
+      ]
+    },
+    {
+      "fx": "delay",
+      "bypass": true,
+      "wet": 0.5,
+      "params": [
+        0.8431,
+        0.4211,
+        0.4,
+        0.5
+      ]
+    },
+    {
+      "fx": "reverb",
+      "bypass": true,
+      "wet": 0.5,
+      "params": [
+        0.5748,
+        0.5,
+        0.5,
+        0.15
+      ]
+    }
+  ]
+}

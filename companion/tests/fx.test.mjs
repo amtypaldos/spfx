@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normToValue, valueToNorm, formatValue, defaultNorm, fxKey, checkAdmission, POOL_BYTES, CPU_BUDGET, normalizeFxTable } from '../js/fx.js';
+import { stepLabels, normToValue, valueToNorm, formatValue, defaultNorm, fxKey, checkAdmission, POOL_BYTES, CPU_BUDGET, normalizeFxTable } from '../js/fx.js';
 import { fxTable } from './helpers.mjs';
 
 test('scale mapping: endpoints for every parameter in the table', () => {
@@ -71,4 +71,12 @@ test('admission arithmetic', () => {
   assert.equal(checkAdmission(Array(3).fill(reverb)).code, 3);          // 960 cycles > 850, memory fits
   assert.equal(checkAdmission([reverb, reverb, reverb, reverb]).code, 3);   // CPU is checked first (as in firmware engine_assign): 1280 > 850, memory would also fail
   assert.equal(CPU_BUDGET, 850);
+});
+
+test('step parameters map exactly like the firmware (floor of n*count, bucket-centred inverse)', () => {
+  const type = fxTable[1].params[3]; // Filter "Type": 4 steps, Low-pass..Notch
+  assert.equal(type.scale, 'step');
+  assert.deepEqual([0, 0.24, 0.25, 0.49, 0.5, 0.74, 0.75, 1].map((n) => normToValue(type, n)), [0, 0, 1, 1, 2, 2, 3, 3]);
+  for (let v = type.min; v <= type.max; v++) assert.equal(normToValue(type, valueToNorm(type, v)), v);
+  assert.equal(stepLabels(type)[normToValue(type, 0.5)], 'Band-pass');
 });

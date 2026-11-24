@@ -12,10 +12,13 @@ Evidence key: **[HOST]** verified by automated tests on a development Mac. **[SR
 | Config sanitising (`engine_config_sanitize`) | repairs corrupt configs. **[HOST]** Binary storage/journal: **[TODO]** |
 | USB audio in/out, I2S, codec drivers, ladder decode, LED PWM | **[TODO]** (reuse Tape Looper drivers, MIT) |
 | Persistence (`firmware/storage`) | versioned record + two-page power-loss-safe journal, write debounce. **[HOST]** |
-| Protocol spec (`docs/PROTOCOL.md`) | written; firmware side **[TODO]**. Companion app and guide graphic: in progress (subagents) |
-| Presets (factory) | **[TODO]** |
+| Protocol (`docs/PROTOCOL.md`, `firmware/protocol`) | spec + C device side, byte-compatible with the companion's JS on golden frames, 100k-stream fuzz. **[HOST]** USB CDC transport: **[TODO]** |
+| Companion (`companion/`) | Web Serial + demo device, Tape Looper-style UI, presets. 51 Node tests + headless browser smoke test. Never run against a real SP-1. |
+| Factory presets (`presets/`, `firmware/app/factory_presets.h`) | six presets, each runs through the real engine within budget. **[HOST]** |
+| Guide (`docs/guide/`) | printable quick-reference (schematic device drawing). |
 
-## Test results (`make test`, last run: all pass)
+## Test results (`make test`: 6 C suites; `node --test companion/tests/*.test.mjs`: 51; all pass)
+- Also: `test_storage` 1,426 checks, `test_protocol` 881, `test_presets` 557.
 - `test_dsp`: 2,382 checks. Parameter map/unmap, silence, 16 parameter corners x every effect with loud noise, automation stability, stereo isolation, filter frequency response (LP/HP), delay timing exact to the sample, feedback ratio, reverb decay, chorus delay, tremolo depth, compressor level, fast-math accuracy, recovery after NaN.
 - `test_engine`: 36,924 checks. Wet/dry, bypass, global bypass, assignment preserves wet/bypass and per-effect params, memory + CPU admission with rollback, 2,000 random reassignments never overlap memory, multiple instances, NaN/Inf input, hot-signal limiter, no pops when switching effects, tails survive bypass, config repair, chain order.
 - `test_controls`: 119 checks. Debounce, tap vs hold, rocker only on held channel (and only if pressed after it), wrap-around, repeat, chord, PLAY, volume steps/repeat, edit mode, soft takeover (approach, cross-over, jitter, NaN, resync), FN-hold power-off, admission error LED, LED encodings, sync scheduling over a simulated 10 min.
@@ -41,3 +44,11 @@ Evidence key: **[HOST]** verified by automated tests on a development Mac. **[SR
 3. Presets (JSON schema + factory presets validated against the admission limits).
 4. Firmware build environment (Zephyr 4.1 / SDK 0.17.4, pinned modules) producing an app-only image at 0x20000. **No flashing.**
 5. **Ask for approval** before any flash: back up current firmware, flash one device, measure USB->headphone latency, CPU cycles, underruns.
+
+## Known discrepancies / open items (from review)
+- Reverb memory: firmware declares 43,116 B, the companion's table says 43,120 (aligned). Cosmetic; the device is authoritative for admission.
+- Companion admission prediction sums memBytes only; the engine also counts state bytes and fragmentation.
+- Sync jack: BPM is stored and scheduled, but no hardware driver, no start/stop trigger, and no tempo-synced effect exists yet (decision pending).
+- METERS resets held peaks, which also affects the output-level LEDs while a host is subscribed.
+- Event ring drops the oldest events silently if the host stops polling.
+- Bug found in review: companion step-parameter mapping (round vs floor) disagreed with firmware; fixed and tested.

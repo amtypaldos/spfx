@@ -1,0 +1,61 @@
+{
+  "schema": "sp1fx.preset",
+  "version": 1,
+  "name": "House",
+  "inputGainDb": 0,
+  "master": 0.75,
+  "bpm": 124,
+  "order": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "globalBypass": false,
+  "slots": [
+    {
+      "fx": "filter",
+      "bypass": false,
+      "wet": 1.0,
+      "params": [
+        0.8674,
+        0.3,
+        0,
+        0.125
+      ]
+    },
+    {
+      "fx": "chorus",
+      "bypass": false,
+      "wet": 0.35,
+      "params": [
+        0.458,
+        0.4,
+        0.1429,
+        0.8
+      ]
+    },
+    {
+      "fx": "delay",
+      "bypass": false,
+      "wet": 0.25,
+      "params": [
+        0.8323,
+        0.3684,
+        0.5,
+        0.8
+      ]
+    },
+    {
+      "fx": "reverb",
+      "bypass": false,
+      "wet": 0.2,
+      "params": [
+        0.4857,
+        0.5,
+        0.5,
+        0.15
+      ]
+    }
+  ]
+}

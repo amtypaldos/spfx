@@ -81,3 +81,13 @@ Max body 512 bytes (payload 500 + 5 bytes of overhead + COBS expansion is handle
 }
 ```
 `fx` is one of `none, filter, chorus, delay, reverb, saturation, flanger, bitcrusher, tremolo, compressor, tape_wobble`. `params` are normalised 0..1 for the active effect. Importers must validate everything, reject unknown schema or version, clamp numbers, and ignore unknown keys.
+
+## Implementation notes (firmware/protocol, not normative)
+Added with the C device implementation. These record choices where v1 is silent; they do not change the spec above.
+- A request whose payload length is not exactly the documented length, an unknown request type (< 0x80), an out-of-range argument, or `SET_PARAM idx >= nparams` of the slot's active effect (so any SET_PARAM on a None slot) is answered with 0x90 code 1. Frames with a device-to-host type (>= 0x80) are ignored.
+- A valid CRC with `ver != 1` is dropped silently, like a CRC error.
+- `cpu_pct` / `cpu_peak_pct` = `round(100 * engine_diag.cpu_{last,peak}_cycles / cpu_budget)`, capped at 255, i.e. the diag cycle counters are taken to be per stereo frame like the budget. `mem_used` is the engine's placed block bytes (state + delay memory, 8-byte aligned), which is slightly more than the sum of the descriptors' `mem_bytes`.
+- METERS resets `engine_diag.in_peak/out_peak` after each report. The output-level LEDs read `out_peak` too, so while a host is subscribed they show the peak since the last report.
+- After SUBSCRIBE the first METERS goes out on the next tick, then every `1000/hz` ms (integer ms; 3 Hz is 333 ms). After a stall longer than a period the schedule restarts instead of bursting.
+- FACTORY_RESET applies `store_data_default()` (all four slots bypassed, BPM 120); if the engine rejected a default slot the answer is code 2. SAVE_NOW without a storage backend, or with a failing write, answers code 5.
+- Device events: fader events (SET_WET, SET_PARAM) are coalesced per control and sent at most every 50 ms, latest value wins; pending fader values for a slot are flushed before a SET_SLOT_FX event for it, and dropped when the host sets the same control. A fader pickup that does not change the value sends nothing. Button events (bypass, global bypass, master, effect change) are sent immediately.

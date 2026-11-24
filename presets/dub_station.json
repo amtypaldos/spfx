@@ -1,0 +1,61 @@
+{
+  "schema": "sp1fx.preset",
+  "version": 1,
+  "name": "Dub Station",
+  "inputGainDb": 0,
+  "master": 0.75,
+  "bpm": 120,
+  "order": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "globalBypass": false,
+  "slots": [
+    {
+      "fx": "saturation",
+      "bypass": false,
+      "wet": 0.6,
+      "params": [
+        0.4,
+        0.6,
+        0.5833,
+        0.5556
+      ]
+    },
+    {
+      "fx": "filter",
+      "bypass": false,
+      "wet": 1.0,
+      "params": [
+        0.699,
+        0.35,
+        0.1,
+        0.125
+      ]
+    },
+    {
+      "fx": "delay",
+      "bypass": false,
+      "wet": 0.45,
+      "params": [
+        0.9785,
+        0.6316,
+        0.55,
+        0.7
+      ]
+    },
+    {
+      "fx": "reverb",
+      "bypass": false,
+      "wet": 0.3,
+      "params": [
+        0.666,
+        0.7,
+        0.5,
+        0.2
+      ]
+    }
+  ]
+}

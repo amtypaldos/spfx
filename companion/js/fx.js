@@ -15,7 +15,8 @@ export const fxKey = (name) => String(name).toLowerCase().replace(/[^a-z0-9]+/g,
 export function normToValue(p, n) {
   n = clamp01(Number.isFinite(n) ? n : 0);
   const span = p.max - p.min;
-  if (p.scale === 'step') return Math.round(p.min + n * span);
+  // Same as firmware fx_param_map(): floor(n*(count)), capped at max. (Was round(), which disagreed.)
+  if (p.scale === 'step') return p.min + Math.min(Math.floor(n * (span + 1)), span);
   if (p.scale === 'log' && p.min > 0 && p.max > p.min) return p.min * Math.pow(p.max / p.min, n);
   return p.min + n * span;
 }
@@ -25,7 +26,8 @@ export function valueToNorm(p, v) {
   const span = p.max - p.min;
   if (!(span > 0)) return 0;
   let n;
-  if (p.scale === 'log' && p.min > 0 && p.max > p.min) n = Math.log(Math.max(v, p.min) / p.min) / Math.log(p.max / p.min);
+  if (p.scale === 'step') n = (v - p.min + 0.5) / (span + 1); // inverse of the above, centred in its bucket
+  else if (p.scale === 'log' && p.min > 0 && p.max > p.min) n = Math.log(Math.max(v, p.min) / p.min) / Math.log(p.max / p.min);
   else n = (v - p.min) / span;
   return clamp01(n);
 }

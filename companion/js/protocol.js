@@ -3,8 +3,8 @@
 // Implements docs/PROTOCOL.md; where that document is silent or inconsistent see PROTOCOL_NOTES.md.
 
 export const PROTO_VERSION = 1;
-export const MAX_BODY = 256;          // PROTOCOL.md: "Max body 256 bytes"
-export const MAX_PAYLOAD = 250;       // PROTOCOL.md: payload 0..250 bytes
+export const MAX_BODY = 512;          // PROTOCOL.md: max body 512 bytes
+export const MAX_PAYLOAD = 500;       // PROTOCOL.md: payload 0..500 bytes
 // PROTOCOL_NOTES.md #1: the 0x83 STATE payload (383 bytes for 11 effects) cannot fit in 250.
 // Receivers therefore accept larger bodies; senders of everything else stay within MAX_BODY.
 export const MAX_BODY_RX = 1024;
