@@ -1,0 +1,31 @@
+# SP-1 FX pinned west manifest (build environment only).
+# Commits are copied from chattock/sp1-tape-looper release612-dependencies.json
+# (upstream commit 0359372e11f61d74a85e2e4449178a5c62010664). See firmware/west-lock.json
+# and docs/BUILD.md. Only the four modules needed for an nRF52840 build are fetched.
+manifest:
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      revision: 75f67d766726351b30199f9a2bf55803d717a3be
+      path: zephyr
+    - name: cmsis
+      remote: zephyrproject-rtos
+      revision: 512cc7e895e8491696b61f7ba8066b4a182569b8
+      path: modules/hal/cmsis
+      groups: [hal]
+    - name: cmsis_6
+      repo-path: CMSIS_6
+      remote: zephyrproject-rtos
+      revision: 30a859f44ef8ab4dc8f84b03ed586fd16ccf9d74
+      path: modules/hal/cmsis_6
+      groups: [hal]
+    - name: hal_nordic
+      remote: zephyrproject-rtos
+      revision: 7858281d843468fe53c829995fb63f45a227387a
+      path: modules/hal/nordic
+      groups: [hal]
+  self:
+    path: sp1fx-manifest

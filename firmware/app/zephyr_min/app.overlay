@@ -1,0 +1,29 @@
+/*
+ * SP-1 FX minimal image overlay on the stem_player board (firmware/boards).
+ *
+ * Disables every peripheral node this image does not use, so no driver
+ * re-initialises bootloader-owned hardware (SP-1-dev wiki "Bootloader":
+ * the TE bootloader starts LFCLK/HFCLK, PWM2, PWM3 and SAADC) and nothing
+ * talks to the codecs, eMMC or Bluetooth module.
+ *
+ * Pins (source: Tape Looper tools/capacity422/runtime/src/main.c, MIT):
+ *   track LED 1 = P0.29, active-high (LED_PWM_POL comment "active-high LEDs")
+ *   FUNCTION    = P0.27, active-low with internal pull-up
+ */
+
+/ {
+	chosen {
+		/delete-property/ zephyr,console;
+	};
+};
+
+&zephyr_user {
+	heartbeat-led-gpios = <&gpio0 29 GPIO_ACTIVE_HIGH>;
+	fn-gpios = <&gpio0 27 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+};
+
+&uac2_speaker { status = "disabled"; };
+&usbd { status = "disabled"; };
+&i2s0 { status = "disabled"; };
+&i2c0 { status = "disabled"; };
+&adc  { status = "disabled"; };

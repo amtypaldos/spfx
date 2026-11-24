@@ -15,6 +15,7 @@ Evidence key: **[HOST]** verified by automated tests on a development Mac. **[SR
 | Protocol (`docs/PROTOCOL.md`, `firmware/protocol`) | spec + C device side, byte-compatible with the companion's JS on golden frames, 100k-stream fuzz. **[HOST]** USB CDC transport: **[TODO]** |
 | Companion (`companion/`) | Web Serial + demo device, Tape Looper-style UI, presets. 51 Node tests + headless browser smoke test. Never run against a real SP-1. |
 | Factory presets (`presets/`, `firmware/app/factory_presets.h`) | six presets, each runs through the real engine within budget. **[HOST]** |
+| Build (`docs/BUILD.md`, `firmware/scripts`, `firmware/app/zephyr_min`) | Zephyr **v4.3.1** (Tape Looper's lock file pins this, not 4.1) + SDK 0.17.4 in `../toolchain`. Minimal heartbeat/watchdog/FN-power-off image builds: 17,316 B at 0x20000, bit-identical across 3 clean builds, `check_image.py` passes. **Never run on a device.** |
 | Guide (`docs/guide/`) | printable quick-reference (schematic device drawing). |
 
 ## Test results (`make test`: 6 C suites; `node --test companion/tests/*.test.mjs`: 51; all pass)
@@ -42,7 +43,7 @@ Evidence key: **[HOST]** verified by automated tests on a development Mac. **[SR
 1. Persistence: versioned binary config + A/B journal on a mock flash, power-loss tests (host).
 2. Protocol: COBS-framed, CRC16, versioned; parser + fuzz tests (host); then Web Serial companion.
 3. Presets (JSON schema + factory presets validated against the admission limits).
-4. Firmware build environment (Zephyr 4.1 / SDK 0.17.4, pinned modules) producing an app-only image at 0x20000. **No flashing.**
+4. Firmware build environment (Zephyr 4.3.1 / SDK 0.17.4, pinned modules) producing an app-only image at 0x20000. **No flashing.**
 5. **Ask for approval** before any flash: back up current firmware, flash one device, measure USB->headphone latency, CPU cycles, underruns.
 
 ## Known discrepancies / open items (from review)
@@ -52,3 +53,4 @@ Evidence key: **[HOST]** verified by automated tests on a development Mac. **[SR
 - METERS resets held peaks, which also affects the output-level LEDs while a host is subscribed.
 - Event ring drops the oldest events silently if the host stops polling.
 - Bug found in review: companion step-parameter mapping (round vs floor) disagreed with firmware; fixed and tested.
+- Minimal image: when USB is plugged in, FN-hold enters SYSTEM_OFF and the device may stay dark until FN is pressed or USB is replugged (Tape Looper soft-resets instead). Pins, PWM ownership of the LED pin, and watchdog-channel assumptions are unverified guesses from Tape Looper's source.

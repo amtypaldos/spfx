@@ -1,0 +1,77 @@
+{
+  "schema": 1,
+  "purpose": "Pinned SP-1 FX firmware build environment (build only; nothing here flashes a device)",
+  "source_of_pins": {
+    "file": "release612-dependencies.json",
+    "project": "https://github.com/chattock/sp1-tape-looper",
+    "project_commit": "0359372e11f61d74a85e2e4449178a5c62010664",
+    "note": "The zephyr commit pinned there is the v4.3.1 release tag, not v4.1.0 (v4.1.0 = 7823374e872145b5bd018bfe447839eb36042611). The three module commits equal the ones in zephyr v4.3.1's own west.yml."
+  },
+  "manifest": "firmware/west.yml",
+  "west_projects": [
+    {
+      "name": "zephyr",
+      "url": "https://github.com/zephyrproject-rtos/zephyr",
+      "commit": "75f67d766726351b30199f9a2bf55803d717a3be",
+      "tag": "v4.3.1",
+      "path": "zephyr",
+      "local_patch": null
+    },
+    {
+      "name": "cmsis",
+      "url": "https://github.com/zephyrproject-rtos/cmsis",
+      "commit": "512cc7e895e8491696b61f7ba8066b4a182569b8",
+      "path": "modules/hal/cmsis"
+    },
+    {
+      "name": "cmsis_6",
+      "url": "https://github.com/zephyrproject-rtos/CMSIS_6",
+      "commit": "30a859f44ef8ab4dc8f84b03ed586fd16ccf9d74",
+      "path": "modules/hal/cmsis_6"
+    },
+    {
+      "name": "hal_nordic",
+      "url": "https://github.com/zephyrproject-rtos/hal_nordic",
+      "commit": "7858281d843468fe53c829995fb63f45a227387a",
+      "path": "modules/hal/nordic"
+    }
+  ],
+  "zephyr_sdk": {
+    "version": "0.17.4",
+    "release": "https://github.com/zephyrproject-rtos/sdk-ng/releases/tag/v0.17.4",
+    "host": "macos-aarch64",
+    "toolchains": ["arm-zephyr-eabi"],
+    "gcc": "arm-zephyr-eabi-gcc (Zephyr SDK 0.17.4) 12.2.0",
+    "files": [
+      {
+        "name": "zephyr-sdk-0.17.4_macos-aarch64_minimal.tar.xz",
+        "bytes": 5152,
+        "sha256": "cc3d26aee46b4264e49f5ef85f72aca8622c30d62b6233ef495837d4303d7c2b"
+      },
+      {
+        "name": "toolchain_macos-aarch64_arm-zephyr-eabi.tar.xz",
+        "bytes": 99923692,
+        "sha256": "c0fbf111d2232dd533d813f49ddfbcc45014c4e2da7f2a17bf80599ac5bfbdeb"
+      }
+    ],
+    "checksum_source": "sha256.sum from the same GitHub release (no vendor signature is published)",
+    "setup_sh_run": false
+  },
+  "host_tools": {
+    "python": "3.13.7 (Homebrew), venv at <toolchain>/venv",
+    "python_requirements": "firmware/scripts/requirements-build.txt",
+    "cmake": "3.26.4 (PyPI wheel, venv)",
+    "ninja": "1.11.1.1 (PyPI wheel, venv)",
+    "west": "1.5.0 (PyPI wheel, venv)",
+    "pyelftools": "0.33 (PyPI wheel, venv)",
+    "dtc": "1.8.1 (Homebrew bottle, /opt/homebrew/bin/dtc; optional for Zephyr, used for extra devicetree checks)"
+  },
+  "board": {
+    "name": "stem_player",
+    "board_root": "firmware",
+    "files": "firmware/boards/teenageengineering/stem_player (verbatim copy from sp1-tape-looper 0359372e)"
+  },
+  "build_defines": {
+    "BUILD_VERSION": "v4.3.1"
+  }
+}
