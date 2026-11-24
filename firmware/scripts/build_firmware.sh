@@ -11,7 +11,9 @@
 # Options (before the command):
 #   --app NAME   app under firmware/app/ to build (default: zephyr_min;
 #                also: zephyr_tone, zephyr_usbaudio, zephyr_fxprof, ...; the
-#                zephyr_ prefix may be left out: --app fxprof).
+#                zephyr_ prefix may be left out: --app fxprof; --app sp1fx is
+#                the integrated firmware). An app may add checker arguments in
+#                firmware/app/NAME/check_image.args (one line).
 #                Default output dir: build/firmware/NAME.
 #   --no-usb     add the app's no_usb.conf (zephyr_tone only: USB console off)
 #
@@ -135,8 +137,14 @@ build() {
   cmake --build "$out" > "$out.build.log" 2>&1 || { tail -40 "$out.build.log"; die "build failed"; }
   grep -E "warning:" "$out.build.log" && echo "(compiler warnings above)" >&2 || true
   sed -n '/Memory region/,/IDT_LIST/p' "$out.build.log"
+  # optional per-app checker arguments (e.g. zephyr_sp1fx: --reserve for its settings pages)
+  local chk=()
+  if [ -f "$app/check_image.args" ]; then
+    read -r -a chk < "$app/check_image.args"
+  fi
   "$VENV/bin/python3" -I "$SCRIPT_DIR/check_image.py" \
     --elf "$out/zephyr/zephyr.elf" --bin "$out/zephyr/zephyr.bin" \
+    ${chk[@]+"${chk[@]}"} \
     --json "$out/check_image.json"
   echo "image: $out/zephyr/zephyr.bin"
   shasum -a 256 "$out/zephyr/zephyr.bin"

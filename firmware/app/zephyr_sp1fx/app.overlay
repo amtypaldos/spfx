@@ -1,0 +1,80 @@
+/*
+ * SP-1 FX integrated firmware overlay on the stem_player board (firmware/boards).
+ *
+ * Audio: the board's UAC2 speaker function (48 kHz, 16-bit stereo, asynchronous, explicit
+ * feedback), cdc_acm_uart0, I2S (slave), I2C (codecs) -- all as zephyr_usbaudio image A.
+ * Controls: SAADC ladders (board channels 0, 1) + the four faders below, BTN_COM rail,
+ * FUNCTION -- as zephyr_controls (hardware-verified channel setup and pins).
+ * LEDs: driven at register level by firmware/drivers/controls_hw.c (PWM0/PWM1).
+ * Sync jack: firmware/drivers/sync_hw.c (P0.23, P0.20, P0.17, TIMER2), register level,
+ * untouched until the clock is switched on.
+ *
+ * Flash map (board: boot 0x0-0x1FFFF, slot0 0x20000-0xFEFFF, storage 0xFF000-0xFFFFF):
+ * slot0 is shortened by two pages and those two pages become the settings journal
+ * (docs/ADR-003-storage.md: "inside our own app region, not the 0xFF000 page"):
+ *   slot0_partition          0x20000 .. 0xFCFFF (the linker refuses a bigger image)
+ *   sp1fx_config_partition   0xFD000 .. 0xFEFFF (two 4 KB pages, written only by main.c)
+ *   storage_partition        0xFF000 .. 0xFFFFF unchanged, never touched by this image
+ * check_image.py --reserve 0xFD000:0xFF000 (check_image.args) fails a build whose image
+ * reaches the settings pages.
+ */
+
+#include <zephyr/dt-bindings/adc/adc.h>
+#include <zephyr/dt-bindings/adc/nrf-saadc.h>
+
+&slot0_partition {
+	reg = <0x00020000 0x000dd000>;
+};
+
+&flash0 {
+	partitions {
+		sp1fx_config_partition: partition@fd000 {
+			label = "sp1fx-config";
+			reg = <0x000fd000 0x00002000>;
+		};
+	};
+};
+
+&adc {
+	channel@2 {
+		reg = <2>;
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 20)>;
+		zephyr,input-positive = <NRF_SAADC_AIN3>;   /* fader 1, P0.05 */
+		zephyr,resolution = <12>;
+	};
+	channel@3 {
+		reg = <3>;
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 20)>;
+		zephyr,input-positive = <NRF_SAADC_AIN6>;   /* fader 2, P0.30 */
+		zephyr,resolution = <12>;
+	};
+	channel@4 {
+		reg = <4>;
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 20)>;
+		zephyr,input-positive = <NRF_SAADC_AIN2>;   /* fader 3, P0.04 */
+		zephyr,resolution = <12>;
+	};
+	channel@5 {
+		reg = <5>;
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 20)>;
+		zephyr,input-positive = <NRF_SAADC_AIN7>;   /* fader 4, P0.31 */
+		zephyr,resolution = <12>;
+	};
+};
+
+&zephyr_user {
+	io-channels = <&adc 0>, <&adc 1>, <&adc 2>, <&adc 3>, <&adc 4>, <&adc 5>;
+	fn-gpios      = <&gpio0 27 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+	btn-com-gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>;
+	osc-en-gpios  = <&gpio0 13 GPIO_ACTIVE_HIGH>;
+	cs42-rst-gpios = <&gpio0 15 GPIO_ACTIVE_LOW>;
+	tas-rst-gpios = <&gpio0 9 GPIO_ACTIVE_LOW>;
+};

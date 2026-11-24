@@ -1,0 +1,94 @@
+# SP-1 FX integrated firmware Kconfig. See docs/BRINGUP_SP1FX.md.
+
+source "samples/subsys/usb/common/Kconfig.sample_usbd"
+
+config SP1FX_USB_CONSOLE
+	bool "USB CDC ACM port: diagnostic text + companion protocol"
+	default y
+	depends on USB_DEVICE_STACK_NEXT && USBD_CDC_ACM_CLASS && UART_INTERRUPT_DRIVEN
+
+config SP1FX_FW_VERSION
+	string "Firmware version string (HELLO_RSP, console banner)"
+	default "sp1fx-v1-rc1"
+
+config SP1FX_OUT_TRIM_DB
+	int "Fixed digital output trim after the engine limiter (dB, <= 0)"
+	default -6
+	range -40 0
+	help
+	  HEARING SAFETY. The engine's soft limiter keeps the signal at or
+	  below full scale; this trim then sets the digital ceiling of the
+	  headphone / speaker signal at the loudest volume setting. -6 dB:
+	  |sample| <= 16423. The codecs keep their own analog limits
+	  (CS42L42 mixer -30 dB, TAS2505 +6 dB / -6 dB). The usbaudio images
+	  used -12 dB with no volume buttons.
+
+config SP1FX_DIAG_PERIOD_MS
+	int "Period of the diagnostic text lines (ms)"
+	default 2000
+	range 500 60000
+
+config SP1FX_UA_FADE_IN_MS
+	int "Fade-in whenever the USB stream (re)starts (ms)"
+	default 200
+	range 50 2000
+
+config SP1FX_UA_FADE_OUT_MS
+	int "Fade-out when the USB stream stops (ms)"
+	default 5
+	range 1 50
+
+config SP1FX_UA_RING_FRAMES
+	int "USB OUT ring capacity (stereo frames, power of two)"
+	default 512
+
+config SP1FX_UA_TARGET_FRAMES
+	int "USB OUT ring target fill (frames; prebuffer level and feedback setpoint)"
+	default 192
+
+config SP1FX_UA_LOW_FRAMES
+	int "Below this fill, duplicate one frame per block (frames)"
+	default 96
+
+config SP1FX_UA_HIGH_FRAMES
+	int "Above this fill, drop one frame per block (frames)"
+	default 320
+
+config SP1FX_UA_FB_KP
+	int "Feedback gain (Q10.14 LSBs per frame of smoothed fill error)"
+	default 8
+
+config SP1FX_UA_FB_EMA_SHIFT
+	int "Fill EMA time constant, 2^N SOFs"
+	default 6
+
+config SP1FX_ENGINE_POOL_KIB
+	int "DSP engine memory pool (KiB, static .bss)"
+	default 150
+
+config SP1FX_SYNC
+	bool "Sync-jack driver (MIDI clock + PO pulses); off until switched on from the companion"
+	default y
+	help
+	  The driver is NOT TESTED with real gear. Even when compiled in, the
+	  jack pins and the 32 us bit timer stay untouched until the clock is
+	  switched on (SET_SYNC from the companion, or a saved "on" state).
+
+config SP1FX_SYNC_MIDI_INVERT
+	bool "Invert the MIDI waveform at the GPIO (compensate the PNP stage)"
+	default y
+
+config SP1FX_SYNC_SWAP_TIP_RING
+	bool "Swap roles: MIDI on the tip pins, PO pulses on the ring pin"
+	default n
+
+config SP1FX_SYNC_PO_ACTIVE_LOW
+	bool "PO pulse is active-low at the pin"
+	default n
+
+config SP1FX_SYNC_PO_PULSE_MS
+	int "PO sync pulse width (ms)"
+	default 5
+	range 1 20
+
+source "Kconfig.zephyr"

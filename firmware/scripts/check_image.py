@@ -12,6 +12,9 @@ FAILS (exit 1) unless:
   * the initial stack pointer (vector table word 0) is in RAM 0x20000000..0x2003FFFF,
   * the reset vector (word 1) is a Thumb address inside the image,
   * the .bin is byte-identical to the ELF's loadable bytes (objcopy --gap-fill 0xff layout),
+  * with --reserve START:END (repeatable): no loadable byte lies in [START, END) (e.g. the
+    settings journal pages 0xFD000..0xFEFFF of zephyr_sp1fx, which the image must never
+    reach because flashing would overwrite them and the firmware erases them),
 and reports flash and RAM use. Requires pyelftools. Writes nothing.
 Limits come from firmware/boards/teenageengineering/stem_player/stem_player.dts.
 """
@@ -38,7 +41,20 @@ def main() -> int:
     ap.add_argument("--elf", required=True)
     ap.add_argument("--bin", required=True)
     ap.add_argument("--json", help="also write the report as JSON to this path")
+    ap.add_argument("--reserve", action="append", default=[], metavar="START:END",
+                    help="flash range [START, END) the image must not touch (hex ok)")
     args = ap.parse_args()
+    reserved = []
+    for r in args.reserve:
+        try:
+            a, b = (int(x, 0) for x in r.split(":"))
+        except ValueError:
+            print(f"ERROR: bad --reserve {r!r}", file=sys.stderr)
+            return 1
+        if not (APP_START <= a < b <= APP_END):
+            print(f"ERROR: --reserve {r} must lie inside the app slot", file=sys.stderr)
+            return 1
+        reserved.append((a, b))
 
     errors = []
     report = {}
@@ -69,6 +85,10 @@ def main() -> int:
                 errors.append(f"load segment 0x{paddr:08x}..0x{end - 1:08x} overlaps storage page")
             if paddr < APP_START:
                 errors.append(f"load segment at 0x{paddr:08x} would overwrite the bootloader")
+            for a, b in reserved:
+                if paddr < b and end > a:
+                    errors.append(f"load segment 0x{paddr:08x}..0x{end - 1:08x} overlaps "
+                                  f"reserved 0x{a:05x}..0x{b - 1:05x}")
 
         first = loads[0][0]
         last = max(p + n for p, _, n, _, _ in loads)
@@ -77,6 +97,9 @@ def main() -> int:
         report["last_load_end"] = f"0x{last:08x}"
         report["flash_image_bytes"] = image_size
         report["flash_limit_bytes"] = APP_MAX_SIZE
+        if reserved:
+            report["reserved"] = " ".join(f"0x{a:05x}..0x{b - 1:05x}" for a, b in reserved)
+            report["room_below_reserved"] = min(a for a, _ in reserved) - last
         if first != APP_START:
             errors.append(f"first loadable byte at 0x{first:08x}, expected 0x{APP_START:08x}")
         if image_size > APP_MAX_SIZE:
