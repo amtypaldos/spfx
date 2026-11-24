@@ -1,0 +1,387 @@
+/* Button gestures, soft takeover, UI controller and LED behaviour. */
+#include "t.h"
+#include "../firmware/controls/controller.h"
+#include "../firmware/app/sync_out.h"
+
+#define SR 48000.0f
+static uint8_t pool[150 * 1024];
+static engine_t eng;
+static controller_t ui;
+static uint32_t T; /* ms clock */
+static float fad[4];
+
+static void setup(uint32_t budget)
+{
+	memset(pool, 0, sizeof pool);
+	engine_init(&eng, pool, sizeof pool, SR, budget);
+	engine_assign(&eng, 0, FX_FILTER);
+	engine_assign(&eng, 1, FX_CHORUS);
+	engine_assign(&eng, 2, FX_DELAY);
+	engine_assign(&eng, 3, FX_REVERB);
+	for (int s = 0; s < 4; s++) { engine_set_wet(&eng, s, 0.5f); engine_set_bypass(&eng, s, 1); fad[s] = 0.5f; }
+	controller_init(&ui, &eng);
+	T = 1000;
+}
+
+/* advance `ms` with a held button mask, ticking every 8 ms */
+static void hold(uint16_t mask, uint32_t ms)
+{
+	for (uint32_t t = 0; t < ms; t += 8) { T += 8; controller_tick(&ui, T, mask, fad); }
+}
+#define B(x) BTN_BIT(x)
+
+static void test_debounce(void)
+{
+	debounce_t d;
+	debounce_init(&d, 2);
+	CHECK(debounce_update(&d, B(BTN_T1)) == 0);        /* one-sample glitch */
+	CHECK(debounce_update(&d, 0) == 0);
+	CHECK(debounce_update(&d, B(BTN_T1)) == 0);
+	CHECK(debounce_update(&d, B(BTN_T1)) == B(BTN_T1)); /* two in a row */
+	CHECK(debounce_update(&d, 0) == B(BTN_T1));
+	CHECK(debounce_update(&d, 0) == 0);
+}
+
+static void test_tap_toggles_bypass(void)
+{
+	setup(850);
+	CHECK(eng.cfg.bypass[1] == 1);
+	hold(B(BTN_T2), 80); hold(0, 40);
+	CHECK(eng.cfg.bypass[1] == 0);
+	hold(B(BTN_T2), 80); hold(0, 40);
+	CHECK(eng.cfg.bypass[1] == 1);
+	CHECK(eng.cfg.bypass[0] == 1 && eng.cfg.bypass[2] == 1);
+	/* a very long press is not a tap */
+	hold(B(BTN_T3), 1200); hold(0, 40);
+	CHECK(eng.cfg.bypass[2] == 1);
+}
+
+static void test_rocker_cycles_only_held_slot(void)
+{
+	setup(850);
+	engine_set_wet(&eng, 0, 0.37f);
+	controller_resync(&ui); /* external change: re-arm takeover so the fader at 0.5 does not override it */
+	int before1 = eng.cfg.fx_id[1], before2 = eng.cfg.fx_id[2];
+	int fx0 = eng.cfg.fx_id[0]; /* Filter; next effect is Chorus, which fits */
+	hold(B(BTN_T1), 100);
+	hold(B(BTN_T1) | B(BTN_FWD), 40);
+	hold(B(BTN_T1), 40);
+	CHECK(eng.cfg.fx_id[0] == (fx0 + 1) % FX_COUNT);
+	hold(B(BTN_T1) | B(BTN_REV), 40);
+	hold(B(BTN_T1), 40);
+	CHECK(eng.cfg.fx_id[0] == fx0);
+	hold(0, 80);
+	/* releasing after cycling must NOT toggle bypass */
+	CHECK(eng.cfg.bypass[0] == 1);
+	CHECK(eng.cfg.fx_id[1] == before1 && eng.cfg.fx_id[2] == before2);
+	/* wet level survives the effect change */
+	CHECK_NEAR(eng.cfg.wet[0], 0.37, 1e-6);
+}
+
+static void test_rocker_wraps_and_repeats(void)
+{
+	setup(100000);
+	/* slot 3 (index 2) currently Delay (3). Step backwards past None to wrap. */
+	engine_assign(&eng, 0, FX_NONE);
+	hold(B(BTN_T1), 100);
+	hold(B(BTN_T1) | B(BTN_REV), 16);
+	hold(B(BTN_T1), 40);
+	CHECK(eng.cfg.fx_id[0] == FX_TAPE_WOBBLE); /* None -> last, wrapped */
+	hold(B(BTN_T1) | B(BTN_FWD), 16);
+	hold(B(BTN_T1), 40);
+	CHECK(eng.cfg.fx_id[0] == FX_NONE);          /* and forward wraps back to None */
+	/* holding the rocker repeats after the delay */
+	hold(B(BTN_T1) | B(BTN_FWD), 1200);
+	CHECK(eng.cfg.fx_id[0] != FX_NONE);
+	int a = eng.cfg.fx_id[0];
+	CHECK(a >= 3); /* several repeats, not just one step */
+	hold(0, 80);
+}
+
+static void test_rocker_ignored_without_channel_and_before_channel(void)
+{
+	setup(850);
+	int id = eng.cfg.fx_id[0];
+	hold(B(BTN_FWD), 100); hold(0, 40);
+	CHECK(eng.cfg.fx_id[0] == id);
+	/* rocker already down when channel is pressed: no action */
+	hold(B(BTN_FWD), 40);
+	hold(B(BTN_FWD) | B(BTN_T1), 100);
+	hold(0, 40);
+	CHECK(eng.cfg.fx_id[0] == id);
+}
+
+static void test_channel_chord_does_nothing(void)
+{
+	setup(850);
+	hold(B(BTN_T1), 40);
+	hold(B(BTN_T1) | B(BTN_T2), 80);
+	hold(0, 40);
+	CHECK(eng.cfg.bypass[0] == 1 && eng.cfg.bypass[1] == 1);
+}
+
+static void test_play_global_bypass(void)
+{
+	setup(850);
+	hold(B(BTN_PLAY), 80); hold(0, 40);
+	CHECK(eng.cfg.global_bypass == 1);
+	hold(B(BTN_PLAY), 80); hold(0, 40);
+	CHECK(eng.cfg.global_bypass == 0);
+	/* PLAY + channel is not a global bypass */
+	hold(B(BTN_PLAY), 40); hold(B(BTN_PLAY) | B(BTN_T1), 80); hold(0, 40);
+	CHECK(eng.cfg.global_bypass == 0);
+	CHECK(eng.cfg.bypass[0] == 1);
+}
+
+static void test_volume_steps_and_repeat(void)
+{
+	setup(850);
+	engine_set_master(&eng, 0.5f);
+	hold(B(BTN_VOLUP), 40); hold(0, 40);
+	CHECK_NEAR(eng.cfg.master, 0.5 + 1.0 / 16, 1e-4);
+	hold(B(BTN_VOLDN), 40); hold(0, 40);
+	CHECK_NEAR(eng.cfg.master, 0.5, 1e-4);
+	hold(B(BTN_VOLUP), 3000); hold(0, 40);
+	CHECK_NEAR(eng.cfg.master, 1.0, 1e-4); /* clamps */
+	hold(B(BTN_VOLDN), 6000); hold(0, 40);
+	CHECK_NEAR(eng.cfg.master, 0.0, 1e-4);
+}
+
+static void test_edit_mode_and_takeover(void)
+{
+	setup(850);
+	/* slot 3 = Delay. Param 1 (time) logical value: default norm */
+	float logical = eng.cfg.params[2][FX_DELAY][0];
+	/* faders are physically at 0.5 (they were the wet faders) */
+	hold(B(BTN_FN), 40);
+	hold(B(BTN_FN) | B(BTN_T3), 80);
+	hold(B(BTN_FN), 40);
+	hold(0, 40);
+	CHECK(ui.mode == UI_EDIT);
+	CHECK(ui.edit_slot == 2);
+	/* FN release after FN+channel must not exit edit mode */
+	hold(0, 100);
+	CHECK(ui.mode == UI_EDIT);
+	/* logical value did not jump to the physical fader */
+	CHECK_NEAR(eng.cfg.params[2][FX_DELAY][0], logical, 1e-6);
+	/* wet levels untouched by entering edit mode */
+	CHECK_NEAR(eng.cfg.wet[2], 0.5, 1e-6);
+	/* move fader 1 far away from logical value: nothing happens until it reaches it */
+	float target = logical;
+	fad[0] = target > 0.5f ? 0.0f : 1.0f;
+	hold(0, 80);
+	CHECK_NEAR(eng.cfg.params[2][FX_DELAY][0], logical, 1e-6);
+	CHECK(ui.to[0].need != 0);
+	/* sweeping across the logical value picks it up */
+	for (int i = 0; i <= 20; i++) { fad[0] = fad[0] + (target - fad[0]) * 0.2f; hold(0, 8); }
+	CHECK(ui.to[0].picked);
+	fad[0] = 0.5f * target + 0.5f * (target > 0.5f ? 1.0f : 0.0f); /* now it moves the parameter */
+	hold(0, 16);
+	CHECK(fabsf(eng.cfg.params[2][FX_DELAY][0] - logical) > 0.01f);
+	/* FN tap returns to performance mode */
+	hold(B(BTN_FN), 60); hold(0, 40);
+	CHECK(ui.mode == UI_PERFORM);
+	/* back in performance the faders do not suddenly set wet levels */
+	CHECK_NEAR(eng.cfg.wet[2], 0.5, 1e-6);
+}
+
+static void test_takeover_unit(void)
+{
+	takeover_t t;
+	float out = -1;
+	takeover_arm(&t, 0.5f);
+	CHECK(!takeover_update(&t, 0.1f, &out));
+	CHECK(t.need == 1); /* fader is below: move up */
+	CHECK(!takeover_update(&t, 0.3f, &out));
+	CHECK(takeover_update(&t, 0.49f, &out)); /* inside the pickup window */
+	CHECK_NEAR(out, 0.49, 1e-6);
+	CHECK(t.picked && t.need == 0);
+	CHECK(!takeover_update(&t, 0.491f, &out)); /* jitter ignored */
+	CHECK(takeover_update(&t, 0.7f, &out));
+
+	/* jumping straight over the value also picks up (crossing) */
+	takeover_arm(&t, 0.5f);
+	CHECK(!takeover_update(&t, 0.1f, &out));
+	CHECK(takeover_update(&t, 0.9f, &out));
+	CHECK(t.picked);
+
+	/* from above */
+	takeover_arm(&t, 0.2f);
+	CHECK(!takeover_update(&t, 0.9f, &out));
+	CHECK(t.need == -1);
+	CHECK(takeover_update(&t, 0.21f, &out));
+
+	/* NaN is ignored */
+	takeover_arm(&t, 0.5f);
+	CHECK(!takeover_update(&t, NAN, &out));
+}
+
+static void test_faders_set_wet_after_pickup(void)
+{
+	setup(850);
+	/* fader is at the logical value: picks up immediately and follows */
+	fad[0] = 0.5f; hold(0, 24);
+	fad[0] = 0.9f; hold(0, 24);
+	CHECK_NEAR(eng.cfg.wet[0], 0.9, 1e-4);
+	/* external change (companion) -> resync -> no jump to the physical fader */
+	engine_set_wet(&eng, 0, 0.2f);
+	controller_resync(&ui);
+	hold(0, 40);
+	CHECK_NEAR(eng.cfg.wet[0], 0.2, 1e-4);
+	CHECK(ui.to[0].need == -1); /* fader (0.9) is above logical (0.2): must move down */
+}
+
+static void test_power_off_gesture(void)
+{
+	setup(850);
+	hold(B(BTN_FN), 1400);
+	CHECK(!ui.power_off_request);
+	hold(B(BTN_FN), 200);
+	CHECK(ui.power_off_request);
+	hold(0, 40);
+	CHECK(ui.mode == UI_PERFORM);
+}
+
+static void test_admission_error_pattern_and_rollback(void)
+{
+	setup(100000);
+	/* fill memory with two reverbs + chorus so Delay on slot 1 cannot fit */
+	CHECK(engine_assign(&eng, 2, FX_REVERB) == ENG_OK); /* frees the 77 KB delay first */
+	CHECK(engine_assign(&eng, 3, FX_NONE) == ENG_OK);
+	CHECK(engine_assign(&eng, 0, FX_REVERB) == ENG_OK);
+	CHECK(engine_assign(&eng, 1, FX_FLANGER) == ENG_OK);
+	int before = eng.cfg.fx_id[1];
+	CHECK(before == FX_FLANGER);
+	hold(B(BTN_T2), 100);
+	/* flanger(6) -> bitcrusher(7) ok ... walk back to delay(3) via REV: 6->5->4->3 : delay fails */
+	for (int k = 0; k < 3; k++) { hold(B(BTN_T2) | B(BTN_REV), 16); hold(B(BTN_T2), 24); }
+	CHECK(eng.cfg.fx_id[1] == FX_CHORUS + 0 || eng.cfg.fx_id[1] != FX_DELAY);
+	CHECK(eng.cfg.fx_id[1] != FX_DELAY); /* never accepted */
+	CHECK(ui.err_until > T - 100);
+	led_frame_t f;
+	/* during the error window the PLAY-side LEDs alternate */
+	ui.err_until = T + 700;
+	controller_leds(&ui, T, &f);
+	int a = f.play[0], b = f.play[1];
+	CHECK((a == 255 && b == 0) || (a == 0 && b == 255));
+	controller_leds(&ui, T + 80, &f);
+	CHECK(f.play[0] != a);
+	hold(0, 40);
+}
+
+static void test_led_performance(void)
+{
+	setup(850);
+	led_frame_t f;
+	/* all bypassed: track LEDs off */
+	controller_leds(&ui, T, &f);
+	for (int i = 0; i < 4; i++) CHECK(f.track[i] == 0);
+	/* enable slot 1: lit, brighter with more wet */
+	hold(B(BTN_T1), 80); hold(0, 40);
+	engine_set_wet(&eng, 0, 0.1f); controller_resync(&ui);
+	controller_leds(&ui, T, &f);
+	uint8_t lo = f.track[0];
+	engine_set_wet(&eng, 0, 0.9f); controller_resync(&ui);
+	fad[0] = 0.9f; hold(0, 40);
+	controller_leds(&ui, T, &f);
+	CHECK(lo > 0);
+	CHECK(f.track[0] > lo);
+	CHECK(f.track[1] == 0);
+	/* global bypass: exactly one LED lit, and it walks */
+	hold(B(BTN_PLAY), 80); hold(0, 40);
+	int seen[4] = {0};
+	for (uint32_t t = 0; t < 1200; t += 50) {
+		controller_leds(&ui, T + t, &f);
+		int lit = 0;
+		for (int i = 0; i < 4; i++) if (f.track[i]) { lit++; seen[i] = 1; }
+		CHECK(lit == 1);
+	}
+	CHECK(seen[0] && seen[1] && seen[2] && seen[3]);
+}
+
+static void test_led_select_and_edit(void)
+{
+	setup(850);
+	led_frame_t f;
+	hold(B(BTN_T3), 100);
+	hold(B(BTN_T3) | B(BTN_FWD), 16); /* Delay(3) -> Reverb(4) */
+	hold(B(BTN_T3), 24);
+	CHECK(eng.cfg.fx_id[2] == FX_REVERB);
+	controller_leds(&ui, T, &f);
+	/* effect number 4 in binary on the PLAY-side LEDs: 0b0100 */
+	CHECK(f.play[0] == 0 && f.play[1] == 0 && f.play[2] == 255 && f.play[3] == 0);
+	hold(0, 40);
+	/* edit mode: PLAY-side LEDs show the slot one-hot, not the meter */
+	hold(B(BTN_FN), 40); hold(B(BTN_FN) | B(BTN_T2), 40); hold(B(BTN_FN), 40); hold(0, 40);
+	CHECK(ui.mode == UI_EDIT && ui.edit_slot == 1);
+	controller_leds(&ui, T, &f);
+	CHECK(f.play[1] > 0 && f.play[0] == 0 && f.play[2] == 0 && f.play[3] == 0);
+	/* pickup status is visible: faders at 0.5, chorus rate default != 0.5 => fast-blinking LED */
+	int changes = 0;
+	uint8_t last = 0;
+	for (uint32_t t = 0; t < 1000; t += 20) {
+		controller_leds(&ui, T + t, &f);
+		if (t && f.track[0] != last) changes++;
+		last = f.track[0];
+	}
+	if (!ui.to[0].picked) CHECK(changes >= 2);
+}
+
+static void test_sync_out(void)
+{
+	sync_out_t s;
+	sync_out_init(&s, SR);
+	sync_out_set_bpm(&s, 120.0f);
+	sync_out_events_t e = sync_out_advance(&s, 48000);
+	CHECK(e.midi_ticks == 0); /* not started */
+	sync_out_start(&s);
+	e = sync_out_advance(&s, 48000);
+	CHECK(e.start == 1);
+	CHECK(e.midi_ticks >= 48 && e.midi_ticks <= 49);
+	CHECK(e.po_pulses >= 4 && e.po_pulses <= 5);
+	e = sync_out_advance(&s, 1);
+	CHECK(e.start == 0);
+
+	/* long-run: no drift against the audio clock at an awkward tempo */
+	sync_out_init(&s, SR);
+	sync_out_set_bpm(&s, 123.4f);
+	sync_out_start(&s);
+	uint64_t ticks = 0;
+	uint64_t frames = 0;
+	for (int i = 0; i < 600 * 750; i++) { ticks += sync_out_advance(&s, 64).midi_ticks; frames += 64; }
+	double expect = (double)frames / SR * 123.4 * 24.0 / 60.0;
+	CHECK_MSG(fabs((double)ticks - expect) <= 1.5, "ticks %llu expect %.2f", (unsigned long long)ticks, expect);
+
+	/* stop is reported once and ticks cease */
+	sync_out_stop(&s);
+	e = sync_out_advance(&s, 4800);
+	CHECK(e.stop == 1 && e.midi_ticks == 0);
+	e = sync_out_advance(&s, 4800);
+	CHECK(e.stop == 0 && e.midi_ticks == 0);
+
+	/* bpm clamping and NaN */
+	sync_out_set_bpm(&s, 5000.0f);
+	sync_out_set_bpm(&s, NAN);
+	CHECK(s.frames_per_tick > 0);
+}
+
+int main(void)
+{
+	RUN(test_debounce);
+	RUN(test_tap_toggles_bypass);
+	RUN(test_rocker_cycles_only_held_slot);
+	RUN(test_rocker_wraps_and_repeats);
+	RUN(test_rocker_ignored_without_channel_and_before_channel);
+	RUN(test_channel_chord_does_nothing);
+	RUN(test_play_global_bypass);
+	RUN(test_volume_steps_and_repeat);
+	RUN(test_edit_mode_and_takeover);
+	RUN(test_takeover_unit);
+	RUN(test_faders_set_wet_after_pickup);
+	RUN(test_power_off_gesture);
+	RUN(test_admission_error_pattern_and_rollback);
+	RUN(test_led_performance);
+	RUN(test_led_select_and_edit);
+	RUN(test_sync_out);
+	T_DONE();
+}
