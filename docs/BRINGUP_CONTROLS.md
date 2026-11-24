@@ -42,11 +42,11 @@ Build of 2026-11-24 (with USB):
 
 ## Flashing (manual, by the owner)
 
-1. Check the hash: `cd ~/spfx/flash-ready && shasum -a 256 -c SHA256SUMS.controls`.
+1. Check the hash: `cd flash-ready && shasum -a 256 -c SHA256SUMS.controls`.
 2. Hold **T1 + T4** while you connect USB. Keep holding until **T1 lights**: the TE bootloader is now in update mode.
 3. Open https://solderless.engineering and flash `sp1fx-controls.bin`.
 4. Recovery uses the same procedure with one of these images:
-   - `~/spfx/flash-ready/sp1fx-min-heartbeat.bin` is known to boot (LED 1 blinks).
+   - `flash-ready/sp1fx-min-heartbeat.bin` is known to boot (LED 1 blinks).
    - `RECOVERY-tape-looper-from-repo.bin` is Tape Looper's release.
 
 ## Console (diagnostics without a debugger)

@@ -44,3 +44,45 @@ Not reviewed: solderless.engineering terms, ericlewis/sp1-midi, reverbose.com pa
 - `firmware/app/zephyr_controls/NOTICES.md`: ladder/fader thresholds and LED/rail handling adapted from chattock/sp1-tape-looper `0359372e` (MIT).
 - `firmware/app/zephyr_sync/NOTICES.md`: MIDI/PO sync bit-banging approach adapted from chattock/sp1-tape-looper `0359372e` (MIT).
 - `firmware/app/zephyr_usbaudio/NOTICES.md`: UAC2/feedback approach adapted from chattock/sp1-tape-looper `0359372e` (MIT) and Zephyr samples (Apache-2.0).
+
+## Added with the integrated firmware (zephyr_sp1fx, rc1 onwards)
+
+This project's own code is MIT, Copyright (c) 2026 Alex Typaldos (see `LICENSE`).
+
+Adapted from chattock/sp1-tape-looper `0359372e11f61d74a85e2e4449178a5c62010664` (MIT, Copyright (c) 2026 chattock; full text in
+`firmware/boards/LICENSES/Tape-Looper-MIT.txt`). Each file below carries a comment naming its source:
+
+| Path | What was taken |
+|---|---|
+| `firmware/drivers/ladder.c/.h` | button-ladder ADC thresholds |
+| `firmware/drivers/controls_hw.c/.h` | fader/ladder/LED/rail handling, ported and restructured |
+| `firmware/drivers/midi_out.c/.h`, `firmware/drivers/sync_hw.c/.h` | MIDI and PO sync pin handling and timer approach, rewritten |
+| `firmware/drivers/saadc_scan.h` | same channel setup as the verified controls image (register-level scanner is new code) |
+| `firmware/app/zephyr_tone/src/sp1_codecs.c/.h` | CS42L42 / TAS2505 initialisation (licence header kept in the file) |
+| `firmware/boards/teenageengineering/stem_player/*` | verbatim copy of the board definition |
+
+Techniques only, no code copied (see `docs/research/TAPELOOPER_DSP_NOTES.md`): reduced-rate reverb and echo, cheap LFOs, per-block
+coefficient updates, cycle-budget guard. Tape Looper's reverb topology descends from Mutable Instruments Clouds; its licence was not
+reviewed and nothing from Clouds is used here.
+
+Hardware facts (pin map, codec/charger signals) come from timknapen/SP-1-dev (MIT; text in `firmware/boards/LICENSES/Tim-Knapen-SP1-dev-MIT.txt`)
+and from the Tape Looper source. The charger pin names and the battery divider ratio are taken from those sources and are not verified by measurement.
+
+## Look-and-feel references (no assets copied)
+
+- `companion/` look and feel is modelled on the Tape Looper companion site (MIT, Copyright (c) 2026 chattock; `companion/LICENSES/Tape-Looper-MIT.txt`).
+- `docs/guide/` card-and-leader-line layout is modelled on the Marisko firmware guide. Only the layout idea is used; no artwork or text was copied.
+  Note: two Marisko repositories are listed above and only one has a licence file, so nothing from either was reused.
+
+## Developer-only tools (not part of any firmware image, not redistributed)
+
+- `tools/fxprof_emu/` needs Python packages installed by the user: `unicorn` (GPL-2.0), `capstone` (BSD), `pyelftools` (public domain). They are used to estimate
+  cycle counts offline and are not linked into or shipped with anything here.
+- Host tests are plain C99 with no third-party code. The companion has no npm runtime dependencies; tests run on Node 22.
+
+## Items to review before the repository is made public
+
+- `ericlewis/sp1-midi`: credited in the board devicetree header (MIT per Tape Looper's file); its licence text has not been reviewed or copied.
+- Confirm the copyright holder name in `LICENSE`, and that no personal paths or device identifiers remain in docs, logs or commit history.
+- Flash images are not committed (`/flash-ready` is outside git). If images are ever published they must ship with the Zephyr, nrfx and CMSIS notices.
+- Fonts or external resources used by the companion and the guide (check `companion/index.html` and `docs/guide/sp1fx-guide.html`).

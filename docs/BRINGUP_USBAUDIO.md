@@ -3,12 +3,12 @@
 Status: **built, never run on hardware.** Everything below about behaviour is
 *expected*, not observed. Only the tone image (`zephyr_tone`) has run on an SP-1.
 
-| Image | File in `~/spfx/flash-ready/` | App dir | USB product / PID |
+| Image | File in `flash-ready/` | App dir | USB product / PID |
 |---|---|---|---|
 | A | **`sp1fx-usbaudio-in-v3.bin`** (optimised DSP + overload guard, see "v3" below); v2: `sp1fx-usbaudio-in-v2.bin` (overloads on every effect preset, measured); v1: `sp1fx-usbaudio-in.bin` (crashes) | `firmware/app/zephyr_usbaudio` | `SP-1 FX`, 0x2fe3:0x0101 |
 | B | `sp1fx-usbaudio-io-v2.bin` (v1: `sp1fx-usbaudio-io.bin`) | `firmware/app/zephyr_usbaudio_io` (same sources) | `SP-1 FX IO`, 0x2fe3:0x0102 |
 
-SHA-256: v2 in `~/spfx/flash-ready/SHA256SUMS.usbaudio2`, v1 in `SHA256SUMS.usbaudio`.
+SHA-256: v2 in `flash-ready/SHA256SUMS.usbaudio2`, v1 in `SHA256SUMS.usbaudio`.
 (VID 0x2fe3 is Zephyr's development VID; for bring-up only.)
 
 ## v3 (`sp1fx-usbaudio-in-v3.bin`): optimised DSP + runtime overload guard
@@ -125,7 +125,7 @@ CRASH: #1 cpu_exception reason=25 thread=audio(2002c1a0) pc=0002a1b4 lr=0002a0f1
 
 ### Retest (owner)
 
-1. `cd ~/spfx/flash-ready && shasum -a 256 -c SHA256SUMS.usbaudio2`.
+1. `cd flash-ready && shasum -a 256 -c SHA256SUMS.usbaudio2`.
 2. Flash `sp1fx-usbaudio-in-v2.bin` (image A) as under "Flashing". Open the console.
 3. Computer volume low, headphones off your ears; play music.
 4. Wait 30 s on Clean. Then tap FUNCTION once every ~10 s through **all 6 presets and back to
@@ -287,7 +287,7 @@ hash; both need the build-script owner's decision.
 
 ## Flashing (manual, by the owner)
 
-1. Check the files: `cd ~/spfx/flash-ready && shasum -a 256 -c SHA256SUMS.usbaudio`.
+1. Check the files: `cd flash-ready && shasum -a 256 -c SHA256SUMS.usbaudio`.
 2. Desktop Chrome (WebUSB), open <https://solderless.engineering>.
 3. SP-1 off. Hold **T1 + T4** while connecting USB; release when **T1 lights up**
    (TE bootloader).
@@ -410,7 +410,7 @@ optional.
 1. Re-enter the bootloader: SP-1 off (FUNCTION hold 1.5 s, or let it reach
    `SYSTEM_OFF`), hold **T1 + T4** while connecting USB until **T1 lights**. If that
    fails, use the solderless.engineering recovery procedure.
-2. Flash a known-good image from `~/spfx/flash-ready/` (verify with
+2. Flash a known-good image from `flash-ready/` (verify with
    `shasum -a 256 -c SHA256SUMS` first): `sp1fx-tone.bin` (confirmed working by the
    owner), `sp1fx-min-heartbeat.bin` (known to boot), or
    `RECOVERY-tape-looper-from-repo.bin` (Tape Looper's release).

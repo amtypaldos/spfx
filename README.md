@@ -132,7 +132,7 @@ Procedure:
 3. Check the image against the staged checksums, then flash it from the Solderless page.
 4. To recover from a bad image, repeat step 2 and flash a known-good image.
 
-Staged images are kept outside the repository, in `~/spfx/flash-ready/`. They are not in git. The build scripts produce them (copies from `build/firmware/...` with SHA-256 checked). Verify with `shasum -a 256 -c SHA256SUMS` in that folder.
+Staged images are kept outside the repository, in `flash-ready/`. They are not in git. The build scripts produce them (copies from `build/firmware/...` with SHA-256 checked). Verify with `shasum -a 256 -c SHA256SUMS` in that folder.
 
 | Image | Purpose |
 |---|---|
@@ -166,4 +166,10 @@ Bring-up procedures and pass/fail checklists are in `docs/BRINGUP_SP1FX.md` (int
 
 Full list of upstream commits, licences, research references and open reviews: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-The project's own licence has not been chosen yet. Until one is added, all rights are reserved by the author.
+This project is released under the **MIT licence**, see [LICENSE](LICENSE). Files copied or adapted from other projects keep their own licence headers, and the upstream licence texts are in `firmware/boards/LICENSES/` and `companion/LICENSES/`.
+
+Also credited, with no code copied from them:
+- **Tape Looper's DSP design** informed the efficiency work: lower-rate reverb and echo, cheap LFOs, block-based coefficient updates and an engine overload guard. See [docs/research/TAPELOOPER_DSP_NOTES.md](docs/research/TAPELOOPER_DSP_NOTES.md). Only the techniques were used, not the code.
+- **Tape Looper's companion site** is the model for the companion's look and feel (palette, top bar, cards, tabs).
+- **The Marisko firmware guide** is the model for the printed controls guide's card-and-leader-line layout. Its artwork and text are not reused.
+- **solderless.engineering** is the browser flasher the owner uses to install images. Nothing from it is included here.

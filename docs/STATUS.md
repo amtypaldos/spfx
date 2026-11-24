@@ -172,7 +172,7 @@ no host reading at all; reconnect starts in text mode and switches again with a 
 
 ## v1-rc1: integrated firmware (2026-11-24) -- superseded by rc2 (resets on hardware)
 
-`firmware/app/zephyr_sp1fx` -> `~/spfx/flash-ready/sp1fx-v1-rc1.bin`, SHA-256
+`firmware/app/zephyr_sp1fx` -> `flash-ready/sp1fx-v1-rc1.bin`, SHA-256
 `cf09092a75e575f643c869b8b7a8155f9b28ece42a70d8151b789c67bd20a9a8`, 144,864 B at 0x20000,
 RAM 205,240 B of 256 KiB, `check_image.py` PASS (incl. `--reserve 0xFD000:0xFF000`), two clean
 builds byte-identical, 0 compiler warnings. [SRC] Owner test plan: `docs/BRINGUP_SP1FX.md`.

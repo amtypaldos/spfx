@@ -1,7 +1,7 @@
 # Tape Looper DSP notes (what makes it cheap, and what we can borrow)
 
 Source studied: github.com/chattock/sp1-tape-looper, commit 0359372 (the pinned 0359372e, reachable in a
-depth-50 clone). Full clone kept at `~/spfx/upstream/tl_full` (read-only reference, nothing run).
+depth-50 clone). Full clone kept at `upstream/tl_full` (read-only reference, nothing run).
 All paths below are relative to `tools/capacity422/runtime/src/` in that clone (the "v4 runtime"; see
 `firmware/README.md`). The DSP is NOT in `firmware/`; it is in `main.c` (20,128 lines) plus `comb.h`.
 Line numbers are for `main.c` unless noted. Cycle numbers marked (est.) are my estimates from reading the
@@ -161,4 +161,4 @@ documented as such (section 1).
 * The reverb network is Mutable Instruments Clouds' (FxEngine, lengths "Clouds' at 32 kHz scaled", main.c:4586).
   Clouds/stmlib are by Emilie Gillet and, as far as I recall, MIT-licensed, but that was NOT verified here;
   if we reproduce the topology and constants, check the Mutable Instruments repo license and credit it too.
-* No files in `~/spfx/sp1-fx` other than this report were modified; no scripts from the clone were run.
+* No files in `<repo>` other than this report were modified; no scripts from the clone were run.

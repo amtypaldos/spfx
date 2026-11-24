@@ -4,7 +4,7 @@ The coordinator merges this into THIRD_PARTY_NOTICES.md. This app does not edit 
 
 ## chattock/sp1-tape-looper: MIT, (c) chattock
 
-- Upstream: `~/spfx/upstream/chattock_sp1-tape-looper`, commit **0359372e**
+- Upstream: `upstream/chattock_sp1-tape-looper`, commit **0359372e**
 - License: MIT (copy in `firmware/boards/LICENSES/Tape-Looper-MIT.txt`)
 - Source file: `tools/capacity422/runtime/src/main.c`. Overlay: `tools/capacity422/runtime/app.overlay`
 

@@ -47,7 +47,7 @@ Result of the build on 2026-11-24 (this Mac, pinned toolchain from `docs/BUILD.m
 
 | Item | Value |
 |---|---|
-| Image | `build/firmware/zephyr_tone/zephyr/zephyr.bin`, copied to `~/spfx/flash-ready/sp1fx-tone.bin` |
+| Image | `build/firmware/zephyr_tone/zephyr/zephyr.bin`, copied to `flash-ready/sp1fx-tone.bin` |
 | Flash (bin) size | **60,636 B** (0xECDC), 6.64 % of the 0xDF000 slot |
 | Load range | `0x00020000`–`0x0002ECDB` |
 | Static RAM | **19,336 B**, 7.38 % of 256 KiB |
@@ -65,7 +65,7 @@ Result of the build on 2026-11-24 (this Mac, pinned toolchain from `docs/BUILD.m
 > The SP-1 has no reset pin and no easy power cycle. Flashing replaces the current app.
 > Back up anything you need first.
 
-1. Check the file: `shasum -a 256 -c ~/spfx/flash-ready/SHA256SUMS`
+1. Check the file: `shasum -a 256 -c flash-ready/SHA256SUMS`
    (`sp1fx-tone.bin` must be `87886d14…33f9`).
 2. Desktop Chrome (WebUSB), open <https://solderless.engineering>.
 3. SP-1 off. Hold **T1 + T4** while connecting USB; release when **T1 lights up**. The
@@ -143,7 +143,7 @@ report what you heard.
 1. Re-enter the bootloader: SP-1 off (FUNCTION hold, or let it reach `SYSTEM_OFF`), hold
    **T1 + T4** while connecting USB until **T1 lights**. If that fails, use the
    solderless.engineering recovery procedure.
-2. Flash a known-good image from `~/spfx/flash-ready/` (verify with
+2. Flash a known-good image from `flash-ready/` (verify with
    `shasum -a 256 -c SHA256SUMS` first):
    - `sp1fx-min-heartbeat.bin` (`18afab48…2667`): known to boot (LED 1 blinks), or
    - `RECOVERY-tape-looper-from-repo.bin` (`e73e3786…badbf`), or the stock firmware from

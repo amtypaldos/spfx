@@ -7,7 +7,7 @@ page has been observed on hardware.** The transmitter core is tested in simulati
 output "untested on real gear". Do not assume the jack works until you have tried the checklist
 below.
 
-- Image: `~/spfx/flash-ready/sp1fx-sync.bin` (SHA-256 in `SHA256SUMS.sync`)
+- Image: `flash-ready/sp1fx-sync.bin` (SHA-256 in `SHA256SUMS.sync`)
 - Source: `firmware/app/zephyr_sync/`, `firmware/drivers/midi_out.{h,c}` (pure C, host-tested),
   `firmware/drivers/sync_hw.{h,c}` (Zephyr/nRF), `firmware/app/sync_out.{h,c}` (the scheduler)
 - Build: `firmware/scripts/build_sync.sh` (build only; it has no flash step)
@@ -165,15 +165,15 @@ The build never flashes. To flash:
 
 1. Disconnect everything from the sync jack.
 2. Hold **T1 + T4** while connecting USB, until T1 lights (TE bootloader / DFU mode).
-3. Open https://solderless.engineering and flash `~/spfx/flash-ready/sp1fx-sync.bin`.
-   Check its SHA-256 against `~/spfx/flash-ready/SHA256SUMS.sync` first
+3. Open https://solderless.engineering and flash `flash-ready/sp1fx-sync.bin`.
+   Check its SHA-256 against `flash-ready/SHA256SUMS.sync` first
    (`shasum -a 256 sp1fx-sync.bin`).
 
 ### Recovery
 
-- `~/spfx/flash-ready/sp1fx-min-heartbeat.bin` is known to boot (LED blinks, verified
+- `flash-ready/sp1fx-min-heartbeat.bin` is known to boot (LED blinks, verified
   by the owner on hardware).
-- `~/spfx/flash-ready/RECOVERY-tape-looper-from-repo.bin` is Tape Looper's release image.
+- `flash-ready/RECOVERY-tape-looper-from-repo.bin` is Tape Looper's release image.
 - If the image misbehaves: hold FUNCTION 1.5 s (if the app runs), or let the battery or watchdog
   reset it, then use T1 + T4 while connecting USB to enter the bootloader and flash one of the
   images above. The bootloader (below 0x20000) is never written by this image:

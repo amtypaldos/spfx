@@ -17,7 +17,7 @@ Any static server works (a module script and a `fetch` of `data/fx_table.json` a
 ## Tests
 ```
 cd companion
-node --test tests/*.test.mjs        # Node 22: ~/.nvm/versions/node/v22.17.1/bin/node
+node --test tests/*.test.mjs        # Node 22: node
 ```
 Covers COBS (incl. zero bytes, 254/255-byte runs, random), CRC known vector (0x29B1), framing and corrupt-frame rejection (every single-bit flip), every message type round trip, STATE decode, preset validation (valid/malformed/hostile/wrong version), library behaviour (persistence, missing/throwing storage), scale mapping, admission arithmetic, and the mock device through the real client and controller (admission errors code 2 and 3, no echo of host changes, device events, retries, rate limit, preset apply).
 

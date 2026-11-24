@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| File | `~/spfx/flash-ready/sp1fx-v1-rc6.bin` (ELF: `sp1fx-v1-rc6.elf`) |
+| File | `flash-ready/sp1fx-v1-rc6.bin` (ELF: `sp1fx-v1-rc6.elf`) |
 | SHA-256 | `daabe9b3961c0b30d38230891b71ae7db819ff83cb3924093f0fa181b2a51597` (in `SHA256SUMS`) |
 | Size | 153,592 B at 0x20000, `check_image.py` PASS, two clean builds identical; companion from the same commit |
 
@@ -38,7 +38,7 @@
 
 | | |
 |---|---|
-| File | `~/spfx/flash-ready/sp1fx-v1-rc5.bin` (ELF: `sp1fx-v1-rc5.elf`) |
+| File | `flash-ready/sp1fx-v1-rc5.bin` (ELF: `sp1fx-v1-rc5.elf`) |
 | SHA-256 | `bfaa973eb2369d935b79d19ca02750296f270988166d5e83c4052dc3954810db` (in `SHA256SUMS`) |
 | Size | 152,584 B at 0x20000, `check_image.py` PASS, two clean builds identical; companion from the same commit |
 
@@ -73,7 +73,7 @@
 
 | | |
 |---|---|
-| File | `~/spfx/flash-ready/sp1fx-v1-rc4.bin` (ELF: `sp1fx-v1-rc4.elf`) |
+| File | `flash-ready/sp1fx-v1-rc4.bin` (ELF: `sp1fx-v1-rc4.elf`) |
 | SHA-256 | `ae95d5caef17b36613dce3104ee03047a6ac381dcb0b4d5d79fd44511365ffbe` (in `SHA256SUMS`) |
 | Size | 151,504 B at 0x20000, `check_image.py` PASS (incl. `--reserve`), two clean builds identical |
 | Companion | use the companion from this commit (STATE has a new trailing byte, see PROTOCOL.md) |
@@ -152,7 +152,7 @@ bar for 1.4 s. The refused pattern (alternating pairs) is unchanged and differen
 
 | | |
 |---|---|
-| File | `~/spfx/flash-ready/sp1fx-v1-rc3.bin` (ELF: `sp1fx-v1-rc3.elf`) |
+| File | `flash-ready/sp1fx-v1-rc3.bin` (ELF: `sp1fx-v1-rc3.elf`) |
 | SHA-256 | `ec36e3befc937ab229822cc036d2e7788865134261af7d61a5631c06f3fa7199` (in `SHA256SUMS`) |
 | Size | 149,612 B at 0x20000, `check_image.py` PASS (incl. `--reserve`), two clean builds identical |
 
@@ -239,7 +239,7 @@ controls ever die again, copy those lines.
 
 | | |
 |---|---|
-| File | `~/spfx/flash-ready/sp1fx-v1-rc2.bin` (ELF for addr2line: `sp1fx-v1-rc2.elf`, same folder) |
+| File | `flash-ready/sp1fx-v1-rc2.bin` (ELF for addr2line: `sp1fx-v1-rc2.elf`, same folder) |
 | SHA-256 | `3ccf3c8ed9fee5de1276e1f26034cd33dd52f893120aa0c6eee27654a2a8f250` (in `SHA256SUMS`) |
 | Size | 152,636 B at 0x20000, `check_image.py` PASS (incl. `--reserve`), two clean builds identical |
 
@@ -311,7 +311,7 @@ journal on real flash, volume buttons, windowed overload guard) or never tested 
 
 | | |
 |---|---|
-| File | `~/spfx/flash-ready/sp1fx-v1-rc1.bin` |
+| File | `flash-ready/sp1fx-v1-rc1.bin` |
 | SHA-256 | `cf09092a75e575f643c869b8b7a8155f9b28ece42a70d8151b789c67bd20a9a8` (also in `SHA256SUMS`) |
 | Size / load address | 144,864 B at 0x20000 (`check_image.py` PASS, two clean builds byte-identical) |
 | Source | `firmware/app/zephyr_sp1fx` (`firmware/scripts/build_firmware.sh --app sp1fx`) |
@@ -320,7 +320,7 @@ journal on real flash, volume buttons, windowed overload guard) or never tested 
 
 ## Safety first
 
-- Check the file: `cd ~/spfx/flash-ready && shasum -a 256 -c SHA256SUMS`.
+- Check the file: `cd flash-ready && shasum -a 256 -c SHA256SUMS`.
 - Flash with Solderless as before (T1 + T4 while connecting USB, release when T1 lights).
 - **Start with headphones off your ears and the Mac's app volume low.** This image is louder
   than the usbaudio images: the fixed output trim is now -6 dB (was -12 dB), and VOL+ goes to

@@ -2,7 +2,7 @@
 
 Status: **built, never run on hardware.** Everything below about behaviour is *expected*.
 
-| File in `~/spfx/flash-ready/` | App dir | USB product / PID | SHA-256 |
+| File in `flash-ready/` | App dir | USB product / PID | SHA-256 |
 |---|---|---|---|
 | `sp1fx-fxprof.bin` | `firmware/app/zephyr_fxprof` | `SP-1 FX fxprof`, 0x2fe3:0x0103 | in `SHA256SUMS` |
 
@@ -48,7 +48,7 @@ FXPROF round=1 done
 
 ## Owner test steps
 
-1. `cd ~/spfx/flash-ready && shasum -a 256 -c SHA256SUMS` (both new lines must say OK).
+1. `cd flash-ready && shasum -a 256 -c SHA256SUMS` (both new lines must say OK).
 2. Flash `sp1fx-fxprof.bin` as usual (desktop Chrome, <https://solderless.engineering>;
    SP-1 off, hold **T1 + T4** while connecting USB, release when T1 lights up, flash).
 3. After boot, LED1 blinks. Open the console: `screen /dev/cu.usbmodem* 115200`
