@@ -21,16 +21,43 @@ struct crash_rec {
 	uint32_t uptime_ms;
 	uint32_t tid, stk_size, stk_unused;
 	uint32_t in_isr;           /* watchdog: 1 = an interrupt was running, PC/LR unknown */
+	uint32_t crumb[CRASHDUMP_CRUMBS];
 	char thread[16];
 	uint32_t crc;              /* CRC-32 of everything above */
 };
 
 /* Retained across resets that keep RAM: .noinit is NOLOAD and outside .bss, so neither the
  * C runtime nor the kernel clears it (checked in the linker map, docs/BRINGUP_USBAUDIO.md). */
+struct stall_rec {
+	uint32_t magic;
+	char line[CRASHDUMP_STALL_LEN];
+	uint32_t crc;
+};
+
 static __attribute__((section(".noinit.sp1fx_crashdump"))) struct {
 	struct crash_rec rec;
 	uint32_t boot_magic, boots, boot_check;
+	struct stall_rec stall[CRASHDUMP_STALL_SLOTS];
+	uint32_t early, early_check, last_count;
 } ret;
+
+static const volatile uint32_t *crumbs;
+
+void crashdump_set_crumbs(const volatile uint32_t *words)
+{
+	crumbs = words;
+}
+
+static void rec_crumbs(void)
+{
+	for (int i = 0; i < CRASHDUMP_CRUMBS; i++) {
+		ret.rec.crumb[i] = crumbs ? crumbs[i] : 0u;
+	}
+}
+
+/* previous run's stall lines, copied at init (the retained ones are reused by this run) */
+static char stall_prev[CRASHDUMP_STALL_SLOTS][CRASHDUMP_STALL_LEN];
+static bool stall_any;
 
 static uint32_t crc_tab[256];
 static bool crc_ready;
@@ -136,6 +163,7 @@ void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
 	ret.rec.bfar = snap_valid ? snap_bfar : SCB->BFAR;
 	ret.rec.uptime_ms = k_uptime_get_32();
 	ret.rec.in_isr = 0u;
+	rec_crumbs();
 	ret.rec.stk_size = 0u;
 	ret.rec.stk_unused = 0u;
 	rec_thread(t);
@@ -180,6 +208,7 @@ void crashdump_wdt_capture(void)
 	ret.rec.cfsr = ret.rec.hfsr = ret.rec.mmfar = ret.rec.bfar = 0u;
 	ret.rec.uptime_ms = k_uptime_get_32();
 	ret.rec.stk_size = ret.rec.stk_unused = 0u; /* no time to scan a stack here */
+	rec_crumbs();
 	rec_thread(k_current_get());
 	rec_seal();
 }
@@ -208,7 +237,74 @@ bool crashdump_init(void)
 	if (!pending) {
 		ret.rec.magic = 0u;
 	}
+	/* crash-loop breaker: count boots that follow an early crash (a new record) */
+	if (ret.early_check != ~ret.early) {
+		ret.early = 0u;
+		ret.last_count = 0u;
+	}
+	if (pending && ret.rec.count != ret.last_count) {
+		ret.early = (ret.rec.uptime_ms < CRASHDUMP_EARLY_MS) ? ret.early + 1u : 0u;
+		ret.last_count = ret.rec.count;
+	} else if (!pending) {
+		ret.early = 0u;
+	}
+	ret.early_check = ~ret.early;
+	for (int i = 0; i < CRASHDUMP_STALL_SLOTS; i++) {
+		struct stall_rec *st = &ret.stall[i];
+
+		stall_prev[i][0] = '\0';
+		if (st->magic == REC_MAGIC &&
+		    st->crc == crc32(st, offsetof(struct stall_rec, crc))) {
+			memcpy(stall_prev[i], st->line, CRASHDUMP_STALL_LEN);
+			stall_prev[i][CRASHDUMP_STALL_LEN - 1] = '\0';
+			stall_any = true;
+		}
+		st->magic = 0u;
+	}
 	return pending;
+}
+
+void crashdump_stall_save(int slot, const char *line)
+{
+	if (slot < 0 || slot >= CRASHDUMP_STALL_SLOTS) {
+		return;
+	}
+	struct stall_rec *st = &ret.stall[slot];
+	size_t i = 0;
+
+	st->magic = 0u;
+	for (; i < CRASHDUMP_STALL_LEN - 1u && line[i] != '\0'; i++) {
+		st->line[i] = line[i];
+	}
+	for (; i < CRASHDUMP_STALL_LEN; i++) {
+		st->line[i] = '\0';
+	}
+	st->magic = REC_MAGIC;
+	st->crc = crc32(st, offsetof(struct stall_rec, crc));
+	__DSB();
+}
+
+void crashdump_stall_clear(void)
+{
+	for (int i = 0; i < CRASHDUMP_STALL_SLOTS; i++) {
+		ret.stall[i].magic = 0u;
+	}
+}
+
+const char *crashdump_stall_prev(int slot)
+{
+	return (slot >= 0 && slot < CRASHDUMP_STALL_SLOTS) ? stall_prev[slot] : "";
+}
+
+uint32_t crashdump_early_crashes(void)
+{
+	return ret.early;
+}
+
+void crashdump_mark_stable(void)
+{
+	ret.early = 0u;
+	ret.early_check = ~0u;
 }
 
 uint32_t crashdump_boots(void)
@@ -240,14 +336,15 @@ int crashdump_format(char *buf, size_t n)
 	int len = snprintk(buf, n,
 			   "CRASH: #%u %s reason=%u thread=%s(%08x)%s pc=%08x lr=%08x xpsr=%08x "
 			   "cfsr=%08x hfsr=%08x mmfar=%08x bfar=%08x stack_unused=%u/%u "
-			   "up=%u ms boots=%u\r\n",
+			   "up=%u ms boots=%u crumbs=stage:%u loop_ms:%u stage_ms:%u adc:0x%x\r\n",
 			   (unsigned int)r->count, reason_name(r), (unsigned int)r->reason,
 			   r->thread, (unsigned int)r->tid, r->in_isr ? " in_isr" : "",
 			   (unsigned int)r->pc, (unsigned int)r->lr, (unsigned int)r->xpsr,
 			   (unsigned int)r->cfsr, (unsigned int)r->hfsr, (unsigned int)r->mmfar,
 			   (unsigned int)r->bfar, (unsigned int)r->stk_unused,
 			   (unsigned int)r->stk_size, (unsigned int)r->uptime_ms,
-			   (unsigned int)ret.boots);
+			   (unsigned int)ret.boots, (unsigned int)r->crumb[0], (unsigned int)r->crumb[1],
+			   (unsigned int)r->crumb[2], (unsigned int)r->crumb[3]);
 
 	if (len < 0) {
 		return 0;
@@ -259,9 +356,9 @@ void crashdump_poll(int64_t now_ms, bool console_open, void (*out)(const char *s
 {
 	static int64_t next_ms;
 	static int prints;
-	char b[288];
+	char b[360];
 
-	if (!pending || !console_open || (prints > 0 && now_ms < next_ms)) {
+	if ((!pending && !stall_any) || !console_open || (prints > 0 && now_ms < next_ms)) {
 		return;
 	}
 	const int len = crashdump_format(b, sizeof(b));
@@ -269,9 +366,19 @@ void crashdump_poll(int64_t now_ms, bool console_open, void (*out)(const char *s
 	if (len > 0) {
 		out(b, len);
 	}
+	for (int i = 0; i < CRASHDUMP_STALL_SLOTS; i++) {
+		if (stall_prev[i][0] != '\0') {
+			int n = snprintk(b, sizeof(b), "STALL[%d] prev run: %s\r\n", i, stall_prev[i]);
+
+			if (n > 0) {
+				out(b, n >= (int)sizeof(b) ? (int)sizeof(b) - 1 : n);
+			}
+		}
+	}
 	next_ms = now_ms + CRASHDUMP_PERIOD_MS;
 	if (++prints >= CRASHDUMP_PRINTS) {
 		ret.rec.magic = 0u; /* seen for a minute: clear */
 		pending = false;
+		stall_any = false;
 	}
 }

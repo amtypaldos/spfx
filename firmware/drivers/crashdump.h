@@ -44,4 +44,30 @@ void crashdump_poll(int64_t now_ms, bool console_open, void (*out)(const char *s
 /* From the watchdog TIMEOUT callback (interrupt context, must be fast). */
 void crashdump_wdt_capture(void);
 
+/* Breadcrumbs: the app points this at CRASHDUMP_CRUMBS words it keeps current (zephyr_sp1fx:
+ * control-loop stage, uptime when the loop last ran, uptime when the stage was entered,
+ * SAADC state; compare with up= on the CRASH line). They are copied into the record by the watchdog capture and the fatal
+ * handler and printed as crumbs=... on the CRASH line. */
+#define CRASHDUMP_CRUMBS 4
+void crashdump_set_crumbs(const volatile uint32_t *words);
+
+/* Crash-loop breaker: number of consecutive boots that followed a crash (watchdog or fatal)
+ * which happened less than CRASHDUMP_EARLY_MS after its own boot. 0 after a clean run;
+ * crashdump_mark_stable() (call once the run has lasted CRASHDUMP_EARLY_MS) resets it. */
+#define CRASHDUMP_EARLY_MS 60000u
+uint32_t crashdump_early_crashes(void);
+void crashdump_mark_stable(void);
+
+/* Stall snapshots (zephyr_sp1fx): a supervisor (k_timer, interrupt context) that sees the
+ * control thread stop making progress formats up to CRASHDUMP_STALL_SLOTS one-line
+ * descriptions (control-loop stage, its state/PC/backtrace, per-thread CPU shares, USB/CDC
+ * counters) into retained RAM with a CRC. They are printed as "STALL[n]: ..." lines after
+ * the next boot (with the CRASH line) and cleared with it. Interrupt-safe. */
+#define CRASHDUMP_STALL_SLOTS 2
+#define CRASHDUMP_STALL_LEN   300
+void crashdump_stall_save(int slot, const char *line);
+void crashdump_stall_clear(void);
+/* the text of a slot from the previous run ("" if none) */
+const char *crashdump_stall_prev(int slot);
+
 #endif

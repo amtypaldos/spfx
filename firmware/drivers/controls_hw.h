@@ -37,6 +37,17 @@ int controls_hw_init(void);
  * Blocking for roughly 0.3 ms. On error every field is -1. */
 int controls_hw_read(controls_raw_t *out);
 
+/* Non-blocking variant (needs CONFIG_ADC_ASYNC): never waits for the SAADC. Each call
+ * collects a finished scan (if any), averages it with the previous one (as the two-scan
+ * controls_hw_read) and starts the next. Returns 0 with fresh values, 1 when the last values
+ * are repeated (scan still running), <0 on error (values -1). A scan that does not finish
+ * within timeout_ms is counted (controls_hw_adc_timeouts) and NOT restarted: the controls
+ * then hold their last values while everything else keeps running. */
+int controls_hw_read_nb(controls_raw_t *out, uint32_t now_ms, uint32_t timeout_ms);
+uint32_t controls_hw_adc_timeouts(void);
+uint32_t controls_hw_adc_max_ms(void);   /* longest scan seen (start -> result collected) */
+int controls_hw_adc_stuck(void);         /* 1: a scan never finished (controls frozen) */
+
 bool controls_hw_fn_pressed(void);
 
 /* Brightness 0..255 per LED (perceptual: squared before it becomes a duty). */

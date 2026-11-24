@@ -242,6 +242,101 @@ int controls_hw_read(controls_raw_t *out)
 	return 0;
 }
 
+#ifdef CONFIG_ADC_ASYNC
+static struct k_poll_signal nb_sig = K_POLL_SIGNAL_INITIALIZER(nb_sig);
+static struct adc_sequence nb_seq;
+static int16_t nb_buf[6];
+static int16_t nb_prev[6];
+static bool nb_running, nb_have_prev, nb_stuck;
+static uint32_t nb_t0, nb_timeouts, nb_max_ms;
+static controls_raw_t nb_last = { -1, -1, { -1, -1, -1, -1 } };
+
+static int nb_start(uint32_t now_ms)
+{
+	int rc = adc_sequence_init_dt(&adc_ch[0], &nb_seq);
+
+	if (rc < 0) {
+		return rc;
+	}
+	nb_seq.buffer = nb_buf;
+	nb_seq.buffer_size = sizeof(nb_buf);
+	nb_seq.channels = 0u;
+	for (int i = 0; i < 6; i++) {
+		nb_seq.channels |= BIT(adc_ch[i].channel_id);
+	}
+	k_poll_signal_reset(&nb_sig);
+	rc = adc_read_async(adc_ch[0].dev, &nb_seq, &nb_sig);
+	if (rc == 0) {
+		nb_running = true;
+		nb_t0 = now_ms;
+	}
+	return rc;
+}
+
+int controls_hw_read_nb(controls_raw_t *out, uint32_t now_ms, uint32_t timeout_ms)
+{
+	int fresh = 1;
+
+	if (adc_status != 0) {
+		*out = nb_last;
+		return adc_status;
+	}
+	if (nb_running) {
+		unsigned int signaled = 0;
+		int result = 0;
+
+		k_poll_signal_check(&nb_sig, &signaled, &result);
+		if (!signaled) {
+			if (!nb_stuck && now_ms - nb_t0 > timeout_ms) {
+				nb_stuck = true;     /* never restart: the driver still owns the context */
+				nb_timeouts++;
+			}
+			*out = nb_last;
+			return 1;
+		}
+		nb_running = false;
+		nb_stuck = false;
+		nb_max_ms = MAX(nb_max_ms, now_ms - nb_t0);
+		if (result == 0) {
+			int16_t v[6];
+
+			for (int i = 0; i < 6; i++) {
+				const int32_t a = nb_buf[i];
+				const int32_t b = nb_have_prev ? nb_prev[i] : nb_buf[i];
+
+				v[i] = clamp_raw((a + b) / 2);
+				nb_prev[i] = nb_buf[i];
+			}
+			nb_have_prev = true;
+			nb_last.ladder1 = v[0];
+			nb_last.ladder2 = v[1];
+			for (int i = 0; i < CONTROLS_HW_NUM_FADERS; i++) {
+				nb_last.fader[i] = v[2 + i];
+			}
+			fresh = 0;
+		}
+	}
+	(void)nb_start(now_ms);
+	*out = nb_last;
+	return fresh;
+}
+
+uint32_t controls_hw_adc_timeouts(void)
+{
+	return nb_timeouts;
+}
+
+uint32_t controls_hw_adc_max_ms(void)
+{
+	return nb_max_ms;
+}
+
+int controls_hw_adc_stuck(void)
+{
+	return nb_stuck ? 1 : 0;
+}
+#endif
+
 bool controls_hw_fn_pressed(void)
 {
 	return gpio_pin_get_dt(&fn) > 0;
