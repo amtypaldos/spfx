@@ -1,0 +1,97 @@
+/*
+ * SP-1 FX USB audio image B overlay on the stem_player board.
+ *
+ * WHY IMPLICIT FEEDBACK: the nRF52840 USBD has exactly one isochronous IN
+ * endpoint (EP8 IN) and one isochronous OUT endpoint (EP8 OUT); all other
+ * endpoints are bulk/interrupt. Image A spends EP8 IN on the explicit
+ * feedback endpoint, so a second (return) IN stream cannot coexist with it.
+ * Here the OUT stream has NO feedback endpoint; the IN stream is an
+ * "implicit feedback data" endpoint: the device sizes each IN packet
+ * (47/48/49 frames) from the OUT ring fill and the host matches its OUT rate
+ * to it. Same structure as Zephyr's samples/subsys/usb/uac2_implicit_feedback
+ * (Apache-2.0), which states the nRF52 endpoints end up at 0x08 / 0x88.
+ * Windows' usbaudio2.sys does not support implicit feedback (Zephyr sample
+ * README); see docs/BRINGUP_USBAUDIO.md.
+ */
+
+#include <dt-bindings/usb/audio.h>
+
+&zephyr_user {
+	heartbeat-led-gpios = <&gpio0 29 GPIO_ACTIVE_HIGH>;   /* LED 1 */
+	stream-led-gpios    = <&gpio0 26 GPIO_ACTIVE_HIGH>;   /* LED 2 */
+	event-led-gpios     = <&gpio1 15 GPIO_ACTIVE_HIGH>;   /* LED 3 */
+	preset-led-gpios    = <&gpio1 14 GPIO_ACTIVE_HIGH>;   /* LED 4 */
+	fn-gpios            = <&gpio0 27 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+	osc-en-gpios        = <&gpio0 13 GPIO_ACTIVE_HIGH>;
+	cs42-rst-gpios      = <&gpio0 15 GPIO_ACTIVE_LOW>;
+	tas-rst-gpios       = <&gpio0 9 GPIO_ACTIVE_LOW>;
+};
+
+&adc  { status = "disabled"; };
+
+/* The board's explicit-feedback speaker function is replaced. */
+&uac2_speaker { status = "disabled"; };
+
+/ {
+	uac2_io: usb_audio2_io {
+		compatible = "zephyr,uac2";
+		status = "okay";
+		full-speed;
+		audio-function = <AUDIO_FUNCTION_OTHER>;
+
+		io_clk: aclk {
+			compatible = "zephyr,uac2-clock-source";
+			clock-type = "internal-programmable";
+			frequency-control = "host-programmable";
+			sampling-frequencies = <48000>;
+		};
+
+		/* host -> SP-1 */
+		io_usb_out: usb_out_terminal {
+			compatible = "zephyr,uac2-input-terminal";
+			clock-source = <&io_clk>;
+			terminal-type = <USB_TERMINAL_STREAMING>;
+			front-left;
+			front-right;
+		};
+
+		io_speaker: speaker {
+			compatible = "zephyr,uac2-output-terminal";
+			data-source = <&io_usb_out>;
+			clock-source = <&io_clk>;
+			terminal-type = <OUTPUT_TERMINAL_SPEAKER>;
+		};
+
+		/* SP-1 -> host: the processed (engine output) signal */
+		io_fx_return: fx_return {
+			compatible = "zephyr,uac2-input-terminal";
+			clock-source = <&io_clk>;
+			terminal-type = <EXTERNAL_TERMINAL_LINE_CONNECTOR>;
+			front-left;
+			front-right;
+		};
+
+		io_usb_in: usb_in_terminal {
+			compatible = "zephyr,uac2-output-terminal";
+			data-source = <&io_fx_return>;
+			clock-source = <&io_clk>;
+			terminal-type = <USB_TERMINAL_STREAMING>;
+		};
+
+		io_as_out: out_interface {
+			compatible = "zephyr,uac2-audio-streaming";
+			linked-terminal = <&io_usb_out>;
+			implicit-feedback;
+			subslot-size = <2>;
+			bit-resolution = <16>;
+		};
+
+		io_as_in: in_interface {
+			compatible = "zephyr,uac2-audio-streaming";
+			linked-terminal = <&io_usb_in>;
+			implicit-feedback;
+			subslot-size = <2>;
+			bit-resolution = <16>;
+		};
+	};
+};

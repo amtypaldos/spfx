@@ -43,3 +43,4 @@ Not reviewed: solderless.engineering terms, ericlewis/sp1-midi, reverbose.com pa
 
 - `firmware/app/zephyr_controls/NOTICES.md`: ladder/fader thresholds and LED/rail handling adapted from chattock/sp1-tape-looper `0359372e` (MIT).
 - `firmware/app/zephyr_sync/NOTICES.md`: MIDI/PO sync bit-banging approach adapted from chattock/sp1-tape-looper `0359372e` (MIT).
+- `firmware/app/zephyr_usbaudio/NOTICES.md`: UAC2/feedback approach adapted from chattock/sp1-tape-looper `0359372e` (MIT) and Zephyr samples (Apache-2.0).

@@ -7,6 +7,7 @@ BUILD   = build
 DSP_SRC = $(wildcard firmware/dsp/*.c) $(wildcard firmware/dsp/effects/*.c)
 CTL_SRC = $(wildcard firmware/controls/*.c)
 APP_SRC = firmware/app/sync_out.c firmware/drivers/ladder.c firmware/drivers/midi_out.c $(wildcard firmware/storage/*.c) $(wildcard firmware/protocol/*.c)
+APP_SRC += firmware/audio/usb_audio_core.c
 LIB_SRC = $(DSP_SRC) $(CTL_SRC) $(APP_SRC)
 LIB_OBJ = $(patsubst %.c,$(BUILD)/%.o,$(LIB_SRC))
 TESTS   = $(patsubst tests/%.c,$(BUILD)/%,$(wildcard tests/test_*.c))

@@ -1,0 +1,22 @@
+/*
+ * SP-1 FX USB audio image A overlay on the stem_player board.
+ *
+ * Uses the board's UAC2 speaker function as is (uac2_speaker: 48 kHz,
+ * 16-bit stereo, asynchronous OUT with an explicit feedback endpoint;
+ * structure from Zephyr's uac2_explicit_feedback sample via
+ * chattock/sp1-tape-looper's board, MIT) + the board's cdc_acm_uart0.
+ * Pins are the tone image's (firmware/app/zephyr_tone/app.overlay).
+ */
+
+&zephyr_user {
+	heartbeat-led-gpios = <&gpio0 29 GPIO_ACTIVE_HIGH>;   /* LED 1 */
+	stream-led-gpios    = <&gpio0 26 GPIO_ACTIVE_HIGH>;   /* LED 2 */
+	event-led-gpios     = <&gpio1 15 GPIO_ACTIVE_HIGH>;   /* LED 3 */
+	preset-led-gpios    = <&gpio1 14 GPIO_ACTIVE_HIGH>;   /* LED 4 */
+	fn-gpios            = <&gpio0 27 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+	osc-en-gpios        = <&gpio0 13 GPIO_ACTIVE_HIGH>;
+	cs42-rst-gpios      = <&gpio0 15 GPIO_ACTIVE_LOW>;
+	tas-rst-gpios       = <&gpio0 9 GPIO_ACTIVE_LOW>;
+};
+
+&adc  { status = "disabled"; };

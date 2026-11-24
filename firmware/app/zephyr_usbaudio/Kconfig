@@ -1,0 +1,81 @@
+# SP-1 FX USB audio bring-up image Kconfig (images A and B).
+# Image A: firmware/app/zephyr_usbaudio      (SP1FX_USB_AUDIO_IN_STREAM=n)
+# Image B: firmware/app/zephyr_usbaudio_io   (same sources, =y)
+# See docs/BRINGUP_USBAUDIO.md.
+
+source "samples/subsys/usb/common/Kconfig.sample_usbd"
+
+config SP1FX_USB_CONSOLE
+	bool "USB CDC ACM status console (once per second)"
+	default y
+	depends on USB_DEVICE_STACK_NEXT && USBD_CDC_ACM_CLASS && UART_INTERRUPT_DRIVEN
+
+config SP1FX_USB_AUDIO_IN_STREAM
+	bool "Image B: return the processed audio to the host (UAC2 IN stream)"
+	help
+	  Adds a UAC2 IN (SP-1 -> host) stream carrying the engine output.
+	  The nRF52840 USBD has ONE isochronous IN endpoint, which image A
+	  uses for the explicit feedback endpoint; image B therefore uses
+	  implicit feedback (the IN packet sizes tell the host the device
+	  rate) and needs the app.overlay of zephyr_usbaudio_io.
+
+config SP1FX_UA_TRIM_DB
+	int "Hard digital output trim after the engine limiter (dB, <= 0)"
+	default -12
+	range -40 0
+	help
+	  HEARING SAFETY. The engine's soft limiter caps the signal at full
+	  scale; this trim then sets the digital ceiling of the headphone /
+	  speaker / return signal (-12 dB -> |sample| <= 8231).
+
+config SP1FX_UA_FADE_IN_MS
+	int "Fade-in whenever the USB stream (re)starts (ms)"
+	default 200
+	range 50 2000
+
+config SP1FX_UA_FADE_OUT_MS
+	int "Fade-out when the USB stream stops (ms)"
+	default 5
+	range 1 50
+
+config SP1FX_UA_RING_FRAMES
+	int "USB OUT ring capacity (stereo frames, power of two)"
+	default 512
+
+config SP1FX_UA_TARGET_FRAMES
+	int "USB OUT ring target fill (frames; prebuffer level and feedback setpoint)"
+	default 192
+
+config SP1FX_UA_LOW_FRAMES
+	int "Below this fill, duplicate one frame per block (frames)"
+	default 96
+
+config SP1FX_UA_HIGH_FRAMES
+	int "Above this fill, drop one frame per block (frames)"
+	default 320
+
+config SP1FX_UA_FB_KP
+	int "Feedback gain (Q10.14 LSBs per frame of smoothed fill error)"
+	default 8
+
+config SP1FX_UA_FB_EMA_SHIFT
+	int "Fill EMA time constant, 2^N SOFs"
+	default 6
+
+config SP1FX_UA_RET_TARGET_FRAMES
+	int "Return (IN) ring target fill (frames)"
+	default 160
+
+config SP1FX_UA_RET_LOW_FRAMES
+	int "Return ring duplicate threshold (frames)"
+	default 64
+
+config SP1FX_UA_RET_HIGH_FRAMES
+	int "Return ring drop threshold (frames)"
+	default 352
+
+config SP1FX_ENGINE_POOL_KIB
+	int "DSP engine memory pool (KiB, static .bss)"
+	default 150
+
+source "Kconfig.zephyr"
