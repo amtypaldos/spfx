@@ -26,6 +26,10 @@ target_sources(app PRIVATE
   ${SP1FX_FW}/app/zephyr_tone/src/sp1_codecs.c
   ${SP1FX_FW}/audio/usb_audio_core.c
   ${SP1FX_FW}/storage/config_store.c
+  ${SP1FX_FW}/drivers/crashdump.c
   ${SP1FX_DSP_SRC}
 )
+# drivers/crashdump.c snapshots the fault status registers before Zephyr's fault decoder
+# clears them: every call of z_arm_fault (from fault_s.S) goes through __wrap_z_arm_fault.
+zephyr_ld_options(-Wl,--wrap=z_arm_fault)
 target_include_directories(app PRIVATE ${SP1FX_FW}/app/zephyr_tone/src ${SP1FX_FW})

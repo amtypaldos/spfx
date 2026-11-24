@@ -12,12 +12,18 @@
  *     implicit feedback instead of a feedback endpoint (one ISO IN endpoint
  *     on the nRF52840; see ../zephyr_usbaudio_io/app.overlay).
  *   FUNCTION tap: next preset (Clean + 6 factory presets) with the
- *     controller's duck -> 25 ms -> engine_apply_config -> unduck sequence.
+ *     controller's duck -> 25 ms -> engine_post_config -> unduck sequence.
+ *     The config is STAGED: the audio thread takes it at the start of its
+ *     next block and initialises changed effects there, at most
+ *     ENGINE_INIT_BUDGET bytes of effect memory per block (dsp/engine.h).
  *   FUNCTION held 1.5 s: fade, mute, SYSTEM_OFF (as zephyr_min / tone).
  *   LED1 heartbeat, LED2 USB OUT stream playing, LED3 any underrun/overrun/
  *   dup/drop in the last second, LED4 preset index as a blink count
  *   (Clean = off, preset k = k blinks every 2 s).
- *   Console: once per second, raw DWT cycle counts of engine_process().
+ *   Console: once per second, raw DWT cycle counts of engine_process(),
+ *     stack high-water marks, config-apply cost, main-loop / audio-block
+ *     stall maxima; a "CRASH: ..." line every 10 s after a crash
+ *     (drivers/crashdump.h, docs/BRINGUP_USBAUDIO.md "Known issue").
  *
  * HEARING SAFETY: codec analog gains as the tone image (CS42L42 mixer -30 dB,
  * TAS2505 +6 dB / -6 dB, sp1_codecs.c, shared unmodified), engine soft
@@ -57,6 +63,7 @@
 #include "audio/usb_audio_core.h"
 #include "dsp/engine.h"
 #include "app/factory_presets.h"
+#include "drivers/crashdump.h"
 
 #define LOOP_MS          10
 #define BLINK_HALF_MS    500
@@ -80,6 +87,17 @@
 #define USB_PKT_BYTES    (USB_MAX_FRAMES * FRAME_BYTES)
 #define OUT_FADE_IN_S    0.2f    /* after a headphone/speaker switch */
 #define OUT_FADE_OUT_S   0.03f
+/* Audio thread stack: engine_process ~1.6 KB of block arrays + effect code + FP exception
+ * frames; measured high-water is printed (stk audio=). */
+#define AUDIO_STACK_SIZE 6144
+/* Effect memory initialised per 64-frame block after a config change (the delay's 75 KB
+ * still goes alone): spreads a full preset change over <= 3 blocks. */
+#define ENGINE_INIT_BUDGET (48u * 1024u)
+/* Starvation guard: this many blocks in a row with < STARVE_IDLE_CYC cycles of waiting
+ * (the audio thread at priority 0 never blocked) -> sleep 1 ms so the main thread (and the
+ * watchdog feed) still run; counted as starve=. */
+#define STARVE_IDLE_CYC  (CPU_HZ / 20000u)   /* 50 us */
+#define STARVE_RUN       32
 
 #if CONFIG_SP1FX_USB_AUDIO_IN_STREAM
 #define UAC2_NODE        DT_NODELABEL(uac2_io)
@@ -211,6 +229,12 @@ static volatile int      g_i2s_start_rc = 1;
 static volatile uint32_t g_blocks, g_err, g_tmo, g_recover;
 static volatile uint32_t g_out_sat;        /* samples saturated by float->int16 */
 static volatile bool     g_playing;        /* consumer in RUN state */
+/* since-boot maxima (audio thread writes, main reads; single words) */
+static volatile uint32_t g_apply_max, g_apply_last; /* engine cycles in blocks that applied a config */
+static volatile uint32_t g_apply_blocks;            /* blocks that applied a config / ran inits */
+static volatile uint32_t g_blk_max_all;             /* whole-block work, cycles */
+static volatile uint32_t g_starve;                  /* starvation-guard sleeps */
+static volatile uint32_t g_i2s_recover_sleep;
 
 static float in_l[BLK_FRAMES], in_r[BLK_FRAMES];
 static float out_l[BLK_FRAMES], out_r[BLK_FRAMES];
@@ -291,7 +315,7 @@ static void render_block(int16_t *dst, uint32_t *eng_cycles)
 #endif
 }
 
-static K_THREAD_STACK_DEFINE(audio_stack, 4096);
+static K_THREAD_STACK_DEFINE(audio_stack, AUDIO_STACK_SIZE);
 static struct k_thread audio_tcb;
 
 static void audio_thread(void *a, void *b, void *c)
@@ -323,9 +347,29 @@ static void audio_thread(void *a, void *b, void *c)
 	uint32_t w_min = UINT32_MAX, w_max = 0, w_blk_max = 0, w_n = 0;
 	uint64_t w_sum = 0;
 
+	uint32_t busy_run = 0;
+	uint32_t t_iter = DWT->CYCCNT, bc = 0;
+
 	for (;;) {
 		void *blk;
 
+		/* starvation guard: did the previous iteration ever wait (for a free slab or
+		 * room in the I2S queue)? If not, for STARVE_RUN blocks in a row, we are
+		 * overloaded at priority 0 and would starve main + the watchdog feed. */
+		{
+			const uint32_t now = DWT->CYCCNT;
+			const uint32_t idle = (now - t_iter) - bc;
+
+			t_iter = now;
+			bc = 0;
+			busy_run = (idle < STARVE_IDLE_CYC) ? busy_run + 1u : 0u;
+			if (busy_run >= STARVE_RUN) {
+				busy_run = 0;
+				g_starve++;
+				k_msleep(1);
+				t_iter = DWT->CYCCNT;
+			}
+		}
 		if (g_audio_stop) {
 			k_sleep(K_FOREVER);
 		}
@@ -335,12 +379,23 @@ static void audio_thread(void *a, void *b, void *c)
 		}
 
 		const uint32_t tb = DWT->CYCCNT;
+		const uint32_t applies0 = eng.diag.cfg_applies, inits0 = eng.diag.slot_inits;
 		uint32_t ec;
 
 		render_block(blk, &ec);
 
-		const uint32_t bc = DWT->CYCCNT - tb;
+		bc = DWT->CYCCNT - tb;
 
+		if (eng.diag.cfg_applies != applies0 || eng.diag.slot_inits != inits0) {
+			g_apply_blocks++;
+			g_apply_last = ec;
+			if (ec > g_apply_max) {
+				g_apply_max = ec;
+			}
+		}
+		if (bc > g_blk_max_all) {
+			g_blk_max_all = bc;
+		}
 		eng.diag.cpu_last_cycles = ec;
 		if (ec > eng.diag.cpu_peak_cycles) {
 			eng.diag.cpu_peak_cycles = ec;
@@ -390,6 +445,11 @@ static void audio_thread(void *a, void *b, void *c)
 		(void)i2s_trigger(i2s_dev, I2S_DIR_TX, I2S_TRIGGER_DROP);
 		prime_and_start();
 		g_recover++;
+		/* never retry at priority 0 without giving the main thread a chance */
+		g_i2s_recover_sleep++;
+		k_msleep(1);
+		t_iter = DWT->CYCCNT;
+		bc = 0;
 	}
 }
 
@@ -799,7 +859,8 @@ static int apply_preset(int idx)
 	} else {
 		factory_preset_fill(&factory_presets[idx - 1], &preset_buf);
 	}
-	return engine_apply_config(&eng, &preset_buf.cfg);
+	/* staged: the audio thread applies it at its next block (dsp/engine.h) */
+	return engine_post_config(&eng, &preset_buf.cfg);
 }
 
 /* x in [0,1] -> thousandths, for printing without float printf */
@@ -823,17 +884,38 @@ static void cyc_fmt(uint32_t blk, unsigned int *per_frame_x10, unsigned int *pct
 				  ((uint64_t)BLK_FRAMES * CPU_HZ));
 }
 
+/* Watchdog TIMEOUT interrupt: ~61 us before the reset, record who was running. */
+static void wdt_timeout_cb(const struct device *dev, int channel_id)
+{
+	ARG_UNUSED(dev);
+	ARG_UNUSED(channel_id);
+	crashdump_wdt_capture();
+}
+
+/* stack bytes used (high-water) of a thread; 0 if unknown */
+static unsigned int stack_used(k_tid_t t, unsigned int *size)
+{
+	size_t unused = 0;
+
+	*size = (unsigned int)t->stack_info.size;
+	if (k_thread_stack_space_get(t, &unused) != 0) {
+		return 0u;
+	}
+	return *size - (unsigned int)unused;
+}
+
 int main(void)
 {
 	sp1fx_boot_resetreas = NRF_POWER->RESETREAS;
 	NRF_POWER->RESETREAS = 0xFFFFFFFFu;
 	feed_wdt();
+	(void)crashdump_init();
 
 	if (device_is_ready(wdt)) {
 		struct wdt_timeout_cfg cfg = {
 			.window.min = 0U,
 			.window.max = 4000U,
-			.callback = NULL,
+			.callback = wdt_timeout_cb,
 			.flags = WDT_FLAG_RESET_SOC,
 		};
 		(void)wdt_install_timeout(wdt, &cfg);
@@ -871,6 +953,7 @@ int main(void)
 	trim_gain = powf(10.0f, (float)CONFIG_SP1FX_UA_TRIM_DB / 20.0f);
 	engine_init(&eng, engine_pool, sizeof(engine_pool), (float)FS_HZ,
 		    ENGINE_DEFAULT_CPU_BUDGET);
+	eng.init_budget = ENGINE_INIT_BUDGET;   /* before the audio thread exists */
 	preset_rejected = apply_preset(0);
 
 	usb_start();
@@ -942,6 +1025,10 @@ int main(void)
 	uint32_t prev_frames_out = 0;
 #endif
 	bool event_led = false;
+	int64_t loop_prev = k_uptime_get();
+	uint32_t loop_gap_max = 0, loop_gap_win = 0;    /* ms between main-loop iterations */
+	int64_t preset_posted_at = -1;
+	uint32_t settle_ms_last = 0;
 
 	CON_PRINTF("SP-1 FX usbaudio image %s: pool=%u B trim=%d dB fade_in=%d ms "
 		   "ring=%d target=%d low=%d high=%d kp=%d\r\n", IMAGE_NAME,
@@ -953,6 +1040,23 @@ int main(void)
 	for (;;) {
 		feed_wdt();
 		now = k_uptime_get();
+		{
+			/* watchdog near-miss indicator: the feed above is the only one */
+			const uint32_t gap = (uint32_t)(now - loop_prev);
+
+			loop_prev = now;
+			if (gap > loop_gap_max) {
+				loop_gap_max = gap;
+			}
+			if (gap > loop_gap_win) {
+				loop_gap_win = gap;
+			}
+		}
+		crashdump_poll(now, con_host_open(), con_write);
+		if (preset_posted_at >= 0 && engine_config_settled(&eng)) {
+			settle_ms_last = (uint32_t)(now - preset_posted_at);
+			preset_posted_at = -1;
+		}
 
 		if (now >= next_toggle) {
 			led_on = !led_on;
@@ -993,6 +1097,7 @@ int main(void)
 			preset_idx = preset_pending;
 			preset_pending = -1;
 			preset_rejected = apply_preset(preset_idx);
+			preset_posted_at = now;
 			engine_set_duck(&eng, 0);
 			eng.diag.cpu_peak_cycles = 0;
 			uint32_t mem = 0, cpu = 0;
@@ -1114,6 +1219,27 @@ int main(void)
 				   tas_ok ? "ack" : "nak", tas_cfg_ok ? "+" : "-", hp_raw,
 				   out_name[cur_out], usb_rc, (unsigned int)con_drops,
 				   (unsigned int)sp1fx_boot_resetreas);
+			{
+				unsigned int a_sz = 0, m_sz = 0;
+				const unsigned int a_used = stack_used(&audio_tcb, &a_sz);
+				const unsigned int m_used = stack_used(k_current_get(), &m_sz);
+
+				CON_PRINTF("  diag stk audio=%u/%u main=%u/%u | apply_cyc max/last=%u/%u "
+					   "n=%u inits=%u settle_ms=%u%s | blk_cyc_max=%u | "
+					   "loop_gap_ms max/1s=%u/%u starve=%u i2s_sleep=%u | "
+					   "torn=%u lay_err=%u boots=%u\r\n",
+					   a_used, a_sz, m_used, m_sz, (unsigned int)g_apply_max,
+					   (unsigned int)g_apply_last, (unsigned int)g_apply_blocks,
+					   (unsigned int)eng.diag.slot_inits, (unsigned int)settle_ms_last,
+					   engine_config_settled(&eng) ? "" : " PENDING",
+					   (unsigned int)g_blk_max_all, (unsigned int)loop_gap_max,
+					   (unsigned int)loop_gap_win, (unsigned int)g_starve,
+					   (unsigned int)g_i2s_recover_sleep,
+					   (unsigned int)eng.diag.torn_retries,
+					   (unsigned int)eng.diag.layout_errors,
+					   (unsigned int)crashdump_boots());
+				loop_gap_win = 0;
+			}
 		}
 
 		k_msleep(LOOP_MS);

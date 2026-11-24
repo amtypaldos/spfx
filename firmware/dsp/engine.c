@@ -58,6 +58,16 @@ int engine_config_sanitize(engine_config_t *c)
 
 /* ------------------------------------------------------------------ setup */
 
+/* Full memory barrier: orders the mailbox accesses between the control and the audio
+ * thread (DMB on Cortex-M; also a compiler barrier). */
+#if defined(__GNUC__) || defined(__clang__)
+#define ENGINE_BARRIER() __sync_synchronize()
+#else
+#error "ENGINE_BARRIER: no memory barrier for this compiler"
+#endif
+
+#define HOOK(e, pt) do { if ((e)->hook) (e)->hook((e), (pt), (e)->hook_ctx); } while (0)
+
 void engine_init(engine_t *e, void *pool, uint32_t pool_bytes, float sr, uint32_t cpu_budget)
 {
 	memset(e, 0, sizeof *e);
@@ -67,6 +77,7 @@ void engine_init(engine_t *e, void *pool, uint32_t pool_bytes, float sr, uint32_
 	e->cpu_budget = cpu_budget;
 	engine_config_default(&e->cfg);
 	for (int s = 0; s < ENGINE_SLOTS; s++) e->cfg.fx_id[s] = FX_NONE;
+	e->run = e->cfg;               /* nothing live, nothing posted */
 	e->k_mix = fx_coef(0.008f, sr);
 	e->k_in = fx_coef(0.005f, sr);
 	e->k_gain = fx_coef(0.010f, sr);
@@ -77,9 +88,9 @@ void engine_init(engine_t *e, void *pool, uint32_t pool_bytes, float sr, uint32_
 	e->master_cur = 0.0f; /* fade up from silence on start */
 }
 
-static uint32_t slot_cycles(const engine_t *e, int s)
+static uint32_t fx_cycles(int fx_id)
 {
-	const fx_desc *d = fx_get(e->cfg.fx_id[s]);
+	const fx_desc *d = fx_get(fx_id);
 	return d ? d->cpu_cycles : 0;
 }
 
@@ -88,31 +99,67 @@ void engine_resources(const engine_t *e, uint32_t *mem_used, uint32_t *cpu_used)
 	uint32_t m = 0, c = 0;
 	for (int s = 0; s < ENGINE_SLOTS; s++) {
 		m += e->blk_size[s];
-		c += slot_cycles(e, s);
+		c += fx_cycles(e->cfg.fx_id[s]);
 	}
 	if (mem_used) *mem_used = m;
 	if (cpu_used) *cpu_used = c;
 }
 
-/* first-fit placement among the desired blocks of every slot except `exclude` */
-static int find_offset(const engine_t *e, int exclude, uint32_t size, uint32_t *off)
+/* ------------------------------------------------- control half: layout */
+
+/* first-fit placement among the blocks of every slot except `exclude` */
+static int find_offset(const uint32_t *boff, const uint32_t *bsize, uint32_t pool_bytes,
+		       int exclude, uint32_t size, uint32_t *off)
 {
 	uint32_t o[ENGINE_SLOTS], z[ENGINE_SLOTS];
 	int n = 0;
 	for (int s = 0; s < ENGINE_SLOTS; s++) {
-		if (s == exclude || e->blk_size[s] == 0) continue;
+		if (s == exclude || bsize[s] == 0) continue;
 		int j = n++;
-		while (j > 0 && o[j - 1] > e->blk_off[s]) { o[j] = o[j - 1]; z[j] = z[j - 1]; j--; }
-		o[j] = e->blk_off[s];
-		z[j] = e->blk_size[s];
+		while (j > 0 && o[j - 1] > boff[s]) { o[j] = o[j - 1]; z[j] = z[j - 1]; j--; }
+		o[j] = boff[s];
+		z[j] = bsize[s];
 	}
 	uint32_t cur = 0;
 	for (int i = 0; i < n; i++) {
 		if (o[i] >= cur && o[i] - cur >= size) { *off = cur; return 1; }
 		if (o[i] + z[i] > cur) cur = o[i] + z[i];
 	}
-	if (e->pool_bytes >= cur && e->pool_bytes - cur >= size) { *off = cur; return 1; }
+	if (pool_bytes >= cur && pool_bytes - cur >= size) { *off = cur; return 1; }
 	return 0;
+}
+
+static int overlaps(uint32_t ao, uint32_t az, uint32_t bo, uint32_t bz)
+{
+	return az && bz && ao < bo + bz && bo < ao + az;
+}
+
+/* Publish {cfg, layout} of the control half to the audio thread (sequence lock, see engine.h).
+ * Post k (1, 2, ...) is written into box[k & 1]; box_seq is 2k-1 while it is written, 2k after. */
+static void post(engine_t *e)
+{
+	uint32_t n = e->box_seq;               /* even: only this thread writes it */
+	uint32_t k = (n >> 1) + 1;
+	engine_msg_t *b = &e->box[k & 1];
+	e->box_seq = n + 1;
+	ENGINE_BARRIER();
+	HOOK(e, ENGINE_HOOK_POST_BEGIN);
+	b->cfg = e->cfg;
+	HOOK(e, ENGINE_HOOK_POST_MID);
+	for (int s = 0; s < ENGINE_SLOTS; s++) {
+		b->blk_off[s] = e->blk_off[s];
+		b->blk_size[s] = e->blk_size[s];
+	}
+	b->post = k;
+	ENGINE_BARRIER();
+	e->box_seq = n + 2;
+	ENGINE_BARRIER();
+	HOOK(e, ENGINE_HOOK_POST_DONE);
+}
+
+int engine_config_settled(const engine_t *e)
+{
+	return e->ack_post == (e->box_seq >> 1);
 }
 
 engine_status engine_assign(engine_t *e, int slot, int fx_id)
@@ -124,33 +171,83 @@ engine_status engine_assign(engine_t *e, int slot, int fx_id)
 
 	uint32_t cpu = d->cpu_cycles;
 	for (int s = 0; s < ENGINE_SLOTS; s++)
-		if (s != slot) cpu += slot_cycles(e, s);
+		if (s != slot) cpu += fx_cycles(e->cfg.fx_id[s]);
 	if (cpu > e->cpu_budget) return ENG_ERR_CPU;
 
 	uint32_t size = fx_block_bytes(d), off = 0;
-	if (size > 0 && !find_offset(e, slot, size, &off)) return ENG_ERR_MEM;
+	if (size > 0 && !find_offset(e->blk_off, e->blk_size, e->pool_bytes, slot, size, &off))
+		return ENG_ERR_MEM;
 
-	/* commit: layout first, then the id the audio thread watches */
 	e->blk_off[slot] = off;
 	e->blk_size[slot] = size;
 	e->cfg.fx_id[slot] = (uint8_t)fx_id;
+	post(e);
 	return ENG_OK;
+}
+
+int engine_post_config(engine_t *e, const engine_config_t *c)
+{
+	engine_config_t tmp = *c;
+	engine_config_sanitize(&tmp);
+	HOOK(e, ENGINE_HOOK_APPLY_SANITIZED);
+
+	/* 1. admission exactly as assigning slot 0..3 in turn into an empty engine:
+	 *    cumulative declared CPU, first-fit memory */
+	uint32_t off[ENGINE_SLOTS] = {0}, size[ENGINE_SLOTS] = {0}, cpu = 0;
+	int rejected = 0;
+	for (int s = 0; s < ENGINE_SLOTS; s++) {
+		const fx_desc *d = fx_get(tmp.fx_id[s]);
+		if (!d || tmp.fx_id[s] == FX_NONE) { tmp.fx_id[s] = FX_NONE; continue; }
+		uint32_t z = fx_block_bytes(d), o = 0;
+		if (cpu + d->cpu_cycles > e->cpu_budget ||
+		    (z > 0 && !find_offset(off, size, e->pool_bytes, s, z, &o))) {
+			tmp.fx_id[s] = FX_NONE;
+			rejected++;
+			continue;
+		}
+		cpu += d->cpu_cycles;
+		off[s] = o;
+		size[s] = z;
+	}
+
+	/* 2. same admitted set, but keep every slot that keeps its effect at its current offset
+	 *    (no re-init, tails survive) if the others still fit around them */
+	uint32_t koff[ENGINE_SLOTS] = {0}, ksize[ENGINE_SLOTS] = {0};
+	int keep_ok = 1;
+	for (int s = 0; s < ENGINE_SLOTS; s++) {
+		if (tmp.fx_id[s] != FX_NONE && tmp.fx_id[s] == e->cfg.fx_id[s] && size[s] == e->blk_size[s]) {
+			koff[s] = e->blk_off[s];
+			ksize[s] = size[s];
+		}
+	}
+	for (int s = 0; s < ENGINE_SLOTS && keep_ok; s++) {
+		if (ksize[s] || !size[s]) continue;
+		uint32_t o;
+		if (!find_offset(koff, ksize, e->pool_bytes, s, size[s], &o)) keep_ok = 0;
+		else { koff[s] = o; ksize[s] = size[s]; }
+	}
+	if (keep_ok) {
+		for (int s = 0; s < ENGINE_SLOTS; s++) { off[s] = koff[s]; size[s] = ksize[s]; }
+	}
+
+	/* 3. write the control half (the audio thread never reads it), then publish */
+	uint8_t ids[ENGINE_SLOTS];
+	for (int s = 0; s < ENGINE_SLOTS; s++) ids[s] = tmp.fx_id[s];
+	e->cfg = tmp;
+	HOOK(e, ENGINE_HOOK_APPLY_HALF);
+	for (int s = 0; s < ENGINE_SLOTS; s++) {
+		e->cfg.fx_id[s] = ids[s];
+		e->blk_off[s] = size[s] ? off[s] : 0;
+		e->blk_size[s] = size[s];
+	}
+	HOOK(e, ENGINE_HOOK_APPLY_WRITTEN);
+	post(e);
+	return rejected;
 }
 
 int engine_apply_config(engine_t *e, const engine_config_t *c)
 {
-	engine_config_t tmp = *c;
-	engine_config_sanitize(&tmp);
-	int rejected = 0;
-	/* free everything first so ordering of slots cannot cause spurious failures */
-	for (int s = 0; s < ENGINE_SLOTS; s++) engine_assign(e, s, FX_NONE);
-	e->cfg = tmp;
-	for (int s = 0; s < ENGINE_SLOTS; s++) e->cfg.fx_id[s] = FX_NONE;
-	for (int s = 0; s < ENGINE_SLOTS; s++) {
-		if (tmp.fx_id[s] == FX_NONE) continue;
-		if (engine_assign(e, s, tmp.fx_id[s]) != ENG_OK) rejected++;
-	}
-	return rejected;
+	return engine_post_config(e, c);
 }
 
 void engine_set_param(engine_t *e, int slot, int idx, float norm)
@@ -158,34 +255,43 @@ void engine_set_param(engine_t *e, int slot, int idx, float norm)
 	if (slot < 0 || slot >= ENGINE_SLOTS || idx < 0 || idx >= FX_MAX_PARAMS) return;
 	if (!(norm == norm)) return;
 	e->cfg.params[slot][e->cfg.fx_id[slot]][idx] = fx_clamp(norm, 0.0f, 1.0f);
+	post(e);
 }
 
 void engine_set_wet(engine_t *e, int slot, float wet)
 {
 	if (slot < 0 || slot >= ENGINE_SLOTS || !(wet == wet)) return;
 	e->cfg.wet[slot] = fx_clamp(wet, 0.0f, 1.0f);
+	post(e);
 }
 
 void engine_set_bypass(engine_t *e, int slot, int bypass)
 {
 	if (slot < 0 || slot >= ENGINE_SLOTS) return;
 	e->cfg.bypass[slot] = bypass ? 1 : 0;
+	post(e);
 }
 
 void engine_set_duck(engine_t *e, int on) { e->duck = on ? 1 : 0; }
 
-void engine_set_global_bypass(engine_t *e, int on) { e->cfg.global_bypass = on ? 1 : 0; }
+void engine_set_global_bypass(engine_t *e, int on)
+{
+	e->cfg.global_bypass = on ? 1 : 0;
+	post(e);
+}
 
 void engine_set_input_gain_db(engine_t *e, float db)
 {
 	if (!(db == db)) return;
 	e->cfg.in_gain_db = fx_clamp(db, -12.0f, 12.0f);
+	post(e);
 }
 
 void engine_set_master(engine_t *e, float v)
 {
 	if (!(v == v)) return;
 	e->cfg.master = fx_clamp(v, 0.0f, 1.0f);
+	post(e);
 }
 
 int engine_set_order(engine_t *e, const uint8_t order[ENGINE_SLOTS])
@@ -196,35 +302,132 @@ int engine_set_order(engine_t *e, const uint8_t order[ENGINE_SLOTS])
 		seen[order[i]] = 1;
 	}
 	for (int i = 0; i < ENGINE_SLOTS; i++) e->cfg.order[i] = order[i];
+	post(e);
 	return 0;
 }
 
-/* ------------------------------------------------------------- audio thread */
+/* ---------------------------------------------------------- audio half */
 
-static void apply_assignments(engine_t *e)
+/* Copy the newest complete snapshot into e->stage. 1 = got a new one. */
+static int take(engine_t *e)
 {
-	for (int s = 0; s < ENGINE_SLOTS; s++) {
-		int want = e->cfg.fx_id[s];
-		if (want == e->live_id[s]) continue;
-		const fx_desc *d = fx_get(want);
-		e->live_id[s] = (uint8_t)want;
-		e->active[s] = 0;
-		e->tail_rem[s] = 0;
-		e->mix_cur[s] = 0.0f; /* new effect fades in */
-		e->in_cur[s] = 0.0f;
-		for (int i = 0; i < FX_MAX_PARAMS; i++) e->pushed[s][i] = -1.0f; /* force push */
-		if (!d || want == FX_NONE) { e->live_st[s] = 0; continue; }
-		uint8_t *base = e->pool + e->blk_off[s];
-		memset(base, 0, e->blk_size[s]);
-		e->live_st[s] = base;
-		d->init(base, base + fx_align8(d->state_bytes), e->sr);
+	for (int tries = 0; tries < 2; tries++) {
+		uint32_t s1 = e->box_seq;
+		ENGINE_BARRIER();
+		uint32_t k = s1 >> 1;              /* newest complete post */
+		if (k == 0 || k == e->run_post) return 0;
+		memcpy(&e->stage, &e->box[k & 1], sizeof e->stage);
+		HOOK(e, ENGINE_HOOK_TAKE_COPIED);
+		ENGINE_BARRIER();
+		uint32_t s2 = e->box_seq;
+		/* box[k & 1] is rewritten only by post k+2, which starts at box_seq = 2k+3 */
+		if (s2 <= 2u * k + 2u && e->stage.post == k) return 1;
+		e->diag.torn_retries++;
 	}
+	return 0;
+}
+
+static void stop_slot(engine_t *e, int s)
+{
+	e->live_id[s] = FX_NONE;
+	e->live_st[s] = 0;
+	e->live_off[s] = 0;
+	e->active[s] = 0;
+	e->tail_rem[s] = 0;
+	e->mix_cur[s] = 0.0f;
+	e->in_cur[s] = 0.0f;
+}
+
+/* Make e->stage the running snapshot. Slots whose effect and offset are unchanged keep
+ * running; every other slot stops now and is (re)initialised by run_inits(). */
+static void adopt(engine_t *e)
+{
+	const engine_msg_t *m = &e->stage;
+	uint32_t off[ENGINE_SLOTS], size[ENGINE_SLOTS];
+	uint8_t id[ENGINE_SLOTS];
+
+	/* defensive check of the snapshot: inside the pool and non-overlapping */
+	for (int s = 0; s < ENGINE_SLOTS; s++) {
+		id[s] = m->cfg.fx_id[s];
+		const fx_desc *d = fx_get(id[s]);
+		off[s] = m->blk_off[s];
+		size[s] = d ? fx_block_bytes(d) : 0;
+		if (!d || id[s] == FX_NONE) { id[s] = FX_NONE; size[s] = 0; continue; }
+		int bad = size[s] != m->blk_size[s] || off[s] > e->pool_bytes ||
+			  e->pool_bytes - off[s] < size[s] || (off[s] & 7u);
+		for (int t = 0; t < s && !bad; t++) bad = overlaps(off[s], size[s], off[t], size[t]);
+		if (bad) { id[s] = FX_NONE; size[s] = 0; e->diag.layout_errors++; }
+	}
+
+	e->run = m->cfg;
+	for (int s = 0; s < ENGINE_SLOTS; s++) {
+		e->run.fx_id[s] = id[s];
+		e->run_off[s] = off[s];
+		e->run_size[s] = size[s];
+		if (id[s] != FX_NONE && e->live_id[s] == id[s] && e->live_off[s] == off[s]) {
+			e->pend_id[s] = FX_NONE;   /* unchanged: keep running */
+			continue;
+		}
+		stop_slot(e, s);
+		e->pend_id[s] = id[s];
+	}
+	e->run_post = m->post;
+	e->pend_post = m->post;
+	e->diag.cfg_applies++;
+}
+
+static void init_slot(engine_t *e, int s)
+{
+	const fx_desc *d = fx_get(e->pend_id[s]);
+	uint8_t *base = e->pool + e->run_off[s];
+	uint32_t st = fx_align8(d->state_bytes);
+	memset(base, 0, st);
+	d->init(base, base + st, e->sr);
+	e->live_id[s] = d->id;
+	e->live_st[s] = base;
+	e->live_off[s] = e->run_off[s];
+	e->active[s] = 0;
+	e->tail_rem[s] = 0;
+	e->mix_cur[s] = 0.0f; /* new effect fades in */
+	e->in_cur[s] = 0.0f;
+	for (int i = 0; i < FX_MAX_PARAMS; i++) e->pushed[s][i] = -1.0f; /* force push */
+	e->pend_id[s] = FX_NONE;
+	e->diag.slot_inits++;
+}
+
+static void run_inits(engine_t *e, int unlimited)
+{
+	uint32_t used = 0;
+	int any_left = 0;
+	for (int s = 0; s < ENGINE_SLOTS; s++) {
+		if (e->pend_id[s] == FX_NONE) continue;
+		uint32_t z = e->run_size[s];
+		if (!unlimited && e->init_budget && used > 0 && used + z > e->init_budget) { any_left = 1; continue; }
+		init_slot(e, s);
+		used += z ? z : 1;
+	}
+	if (used > e->diag.init_bytes_max) e->diag.init_bytes_max = used;
+	if (!any_left && e->pend_post) {
+		e->ack_post = e->pend_post;
+		e->pend_post = 0;
+	}
+}
+
+static void apply_pending(engine_t *e, int unlimited)
+{
+	if (take(e)) adopt(e);
+	run_inits(e, unlimited);
+}
+
+void engine_pump(engine_t *e)
+{
+	apply_pending(e, 1);
 }
 
 static void push_params(engine_t *e, int s, const fx_desc *d)
 {
 	for (int i = 0; i < d->nparams; i++) {
-		float v = e->cfg.params[s][d->id][i];
+		float v = e->run.params[s][d->id][i];
 		if (v != e->pushed[s][i]) {
 			d->set_param(e->live_st[s], i, v);
 			e->pushed[s][i] = v;
@@ -251,14 +454,12 @@ static void process_chunk(engine_t *e, float *L, float *R, int n)
 	float wl[FX_MAX_BLOCK], wr[FX_MAX_BLOCK];
 	float dl[FX_MAX_BLOCK], dr[FX_MAX_BLOCK];
 
-	apply_assignments(e);
-
 	for (int k = 0; k < ENGINE_SLOTS; k++) {
-		int s = e->cfg.order[k];
+		int s = e->run.order[k];
 		const fx_desc *d = fx_get(e->live_id[s]);
 		if (!d || e->live_id[s] == FX_NONE) continue;
 
-		int enabled = !e->cfg.bypass[s] && !e->cfg.global_bypass;
+		int enabled = !e->run.bypass[s] && !e->run.global_bypass;
 		int send = d->mix_mode == FX_MIX_SEND;
 		uint32_t tail_len = (uint32_t)(((d->tail_ms > 60u ? d->tail_ms : 60u) * e->sr) / 1000.0f);
 
@@ -274,7 +475,7 @@ static void process_chunk(engine_t *e, float *L, float *R, int n)
 		e->active[s] = 1;
 		push_params(e, s, d);
 
-		float mix_t = e->cfg.global_bypass ? 0.0f : (send ? e->cfg.wet[s] : (enabled ? e->cfg.wet[s] : 0.0f));
+		float mix_t = e->run.global_bypass ? 0.0f : (send ? e->run.wet[s] : (enabled ? e->run.wet[s] : 0.0f));
 		float in_t = (send ? (enabled ? 1.0f : 0.0f) : 1.0f);
 		float mc = e->mix_cur[s], ic = e->in_cur[s];
 		for (int i = 0; i < n; i++) {
@@ -317,7 +518,10 @@ void engine_process(engine_t *e, const float *in_l, const float *in_r, float *ou
 		int m = n - done;
 		if (m > FX_MAX_BLOCK) m = FX_MAX_BLOCK;
 
-		float g_t = powf(10.0f, e->cfg.in_gain_db / 20.0f);
+		/* config hand-over: only here, at the start of a chunk, on this thread */
+		apply_pending(e, 0);
+
+		float g_t = powf(10.0f, e->run.in_gain_db / 20.0f);
 		float ig = e->ingain_cur;
 		float ipk = 0.0f;
 		for (int i = 0; i < m; i++) {
@@ -337,7 +541,7 @@ void engine_process(engine_t *e, const float *in_l, const float *in_r, float *ou
 
 		process_chunk(e, L, R, m);
 
-		float mg_t = master_gain(e->cfg.master);
+		float mg_t = master_gain(e->run.master);
 		float mg = e->master_cur;
 		float dk = e->duck_cur, dk_t = e->duck ? 0.0f : 1.0f;
 		float opk = 0.0f;

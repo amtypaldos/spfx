@@ -40,6 +40,8 @@ typedef struct fx_desc {
 	uint32_t tail_ms;       /* time the effect keeps ringing after input stops */
 	uint8_t mix_mode;
 	uint8_t stereo_independent; /* 1 if L and R never interact (for tests) */
+	/* The engine zeroes the state struct only: init() must set up the whole state and clear
+	 * the mem_bytes it uses (tests/test_engine_race.c checks every effect). */
 	void (*init)(void *st, void *mem, float sr);
 	void (*reset)(void *st);
 	void (*set_param)(void *st, int idx, float norm);

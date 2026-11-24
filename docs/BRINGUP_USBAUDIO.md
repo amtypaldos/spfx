@@ -5,11 +5,118 @@ Status: **built, never run on hardware.** Everything below about behaviour is
 
 | Image | File in `~/spfx/flash-ready/` | App dir | USB product / PID |
 |---|---|---|---|
-| A | `sp1fx-usbaudio-in.bin` | `firmware/app/zephyr_usbaudio` | `SP-1 FX`, 0x2fe3:0x0101 |
-| B | `sp1fx-usbaudio-io.bin` | `firmware/app/zephyr_usbaudio_io` (same sources) | `SP-1 FX IO`, 0x2fe3:0x0102 |
+| A | `sp1fx-usbaudio-in-v2.bin` (v1: `sp1fx-usbaudio-in.bin`, crashes, see below) | `firmware/app/zephyr_usbaudio` | `SP-1 FX`, 0x2fe3:0x0101 |
+| B | `sp1fx-usbaudio-io-v2.bin` (v1: `sp1fx-usbaudio-io.bin`) | `firmware/app/zephyr_usbaudio_io` (same sources) | `SP-1 FX IO`, 0x2fe3:0x0102 |
 
-SHA-256 in `~/spfx/flash-ready/SHA256SUMS.usbaudio`.
+SHA-256: v2 in `~/spfx/flash-ready/SHA256SUMS.usbaudio2`, v1 in `SHA256SUMS.usbaudio`.
 (VID 0x2fe3 is Zephyr's development VID; for bring-up only.)
+
+## Known issue found on hardware (v1): crash on the first preset change
+
+**Observed (owner, spare SP-1, v1 image A, console log captured):** USB audio from a Mac
+through preset 0 (Clean, all slots bypassed) ran 3+ minutes with no underruns, I2S
+errors or drops, `cyc_frame` ~130-215 cycles/frame. One FUNCTION tap: the main thread
+printed `preset 1:Dub Station rejected=0 mem=120336 cpu_decl=560` (so
+`engine_apply_config()` had returned), then the console went silent for good; the owner
+heard static, then silence. The device came back by itself; its `rr=` field read **2 =
+watchdog reset** (earlier boots: `rr=4`, soft reset). So after the preset change the main
+thread stopped feeding the 4 s watchdog: either the CPU faulted (Zephyr's default fatal
+handler halts with interrupts locked; the I2S then repeats its last buffers = static) or
+the priority-0 audio thread never blocked again and starved the main thread. The same
+preset switching works in the controls-only image, which never runs `engine_process()`.
+
+**Not reproduced: there is no debugger and I did not run anything on the device. The root
+cause of this crash is NOT proven.** What was found by reading the code and by host
+simulation, and what changed in v2:
+
+| # | Finding | Status | v2 |
+|---|---|---|---|
+| 1 | **Data race in `engine_apply_config()`** (main thread) against `engine_process()` (audio thread, priority 0, pre-empts main). The old code freed every slot, then copied the whole new config (`e->cfg = tmp`, ~740 B) **including the new fx ids while `blk_off`/`blk_size` were still 0**, and only then cleared the ids and re-assigned. An audio block starting inside that copy initialised every changed effect at offset 0 on top of each other (delay, reverb and filter state overlapping: buffer pointers/sizes of one effect overwritten by another's init -> out-of-bounds writes -> fault or corruption), and kept them there, because later the ids matched again. | **Real (proven by reading; the window is reached deterministically by `test_engine_race`).** That it caused *this* crash is an assumption: the window is the ~740 B copy, a few us out of every 1333 us block, roughly a 0.2-0.5 % chance per tap (estimate). | Fixed by design, see "Config hand-over" below. |
+| 2 | **Stale layout**: an effect that stayed in the same slot was never re-initialised, so it kept running at its OLD offset while the layout said it had moved (Clean -> Dub Station: delay and reverb live at 6304/83192, layout 144/77032). Later assignments are placed by the layout and could land on live memory. | **Real, deterministic, proven by host simulation of the device's exact sequence.** The same simulation shows it did **not** overlap anything on the first Clean -> Dub Station change, so it does not explain this crash on its own. | Fixed: a live slot always sits exactly at the offset of the snapshot it was initialised from (checked after every block in the new test). |
+| 3 | **CPU overload at priority 0**: Dub Station is the first preset in which effects actually run (Clean bypasses all). If the real cost exceeds 1333 cycles/frame, the audio thread finds a free I2S block every time, never blocks, and the main thread (console, watchdog feed) never runs again; underruns make static. Fits all the evidence. | **Suspected, not measured.** Static estimate for Dub Station: ~800-1050 cycles/frame (60-80 %; declared 560 + measured 131 base + ~40/slot engine overhead, scaled by the measured Clean base), so an overload is possible but not expected. | Guarded and measured: starvation guard (`starve=`), per-preset `cpu%`, `loop_gap_ms`. |
+| 4 | **Long apply inside one block**: the old audio thread zeroed each changed effect's whole block and the effect's `init()` then zeroed its delay memory again, all in one 1.33 ms block: up to ~250 KB of stores for e.g. Lo-Fi Tape -> Ambient, ~1-4 ms at 0.25-1 cycle/byte (estimate). Clean -> Dub Station only re-initialised saturation + filter (144 B), so this is **not** the cause of this crash. | Real for other preset pairs (would cause an underrun click, not a hang: the I2S queue holds ~5 ms). | Engine zeroes only the state struct (`init()` clears its own memory; checked for every effect by a test); at most 48 KB of effect memory is initialised per block (the delay's 75 KB goes alone); unchanged slots keep their memory. Measured: `apply_cyc`. |
+| 5 | Audio-thread stack overflow (no MPU guard was enabled, so an overflow would corrupt RAM silently). | Ruled out as likely: `-fstack-usage` gives `engine_process` 1,712 B, `audio_thread` 112 B, largest effect `process` 136 B, `adopt`/`run_inits` 96/64 B, plus a 104 B FP exception frame and libm (unknown, small): **~2.3-2.6 KB of the old 4,096 B (estimate)**. Main thread ~1.7-2 KB of 4,096 B. | MPU stack guards on (`CONFIG_HW_STACK_PROTECTION`), audio stack 6,144 B, measured high-water printed (`stk`). |
+| 6 | I2S recovery loop in the audio thread could retry at priority 0 without sleeping. | Real but minor: it blocks in the I2S queue soon after a failed restart. | Sleeps 1 ms after every recovery (`i2s_sleep=`). |
+| 7 | Alignment faults: pool `__aligned(8)`, every block offset is a multiple of 8 (`fx_align8` sums), state structs are 8-aligned, int16 delay buffers start 8-aligned; Cortex-M4 allows unaligned LDR/STR anyway (not LDRD/VLDR, which only see aligned fields here). | Ruled out by reading. | The audio side re-checks each snapshot's layout (`lay_err=` must stay 0). |
+
+### Config hand-over (v2, `firmware/dsp/engine.{h,c}`)
+
+The control API (`engine_post_config`, `engine_apply_config` (same path), `engine_assign`,
+`engine_set_*`) now runs admission on a control-only copy (`cfg`, `blk_off/size`; the
+audio thread never reads it) and publishes a complete snapshot {config, layout} through a
+two-buffer sequence lock with memory barriers. At the **start** of every 64-frame chunk the
+audio thread takes the newest complete snapshot, keeps every slot whose effect and offset are
+unchanged (tails survive: Clean -> Dub Station keeps delay and reverb running), stops the
+others at once and initialises them at their new offsets, at most `init_budget` bytes per
+block. Nothing locks interrupts or blocks; correctness does not depend on thread priorities.
+`engine_config_settled()` says when everything posted is live. The controller, the protocol
+(preset loads, `FACTORY_RESET`) and both USB audio images all go through this path; the
+threading rules are at the top of `engine.h`.
+
+Proof on the host (`tests/test_engine_race.c`, single-threaded, interleavings forced with a
+hook): `engine_process()` is run at every step of a config change, including the exact old
+race window (new fx ids written, layout not yet), and the audio thread's mailbox copy is
+interrupted by nested posts (torn copies are detected and retried); after every block every
+live effect must sit at its snapshot's offset, inside the pool, non-overlapping; 4 KB guard
+zones around the pool must stay intact; output finite. Plus a storm of 10,000 random
+(partly invalid) configs interleaved with ~33,000 `engine_process()` calls of 1..130 frames
+and random init budgets. All pass. **This proves the engine logic, not the device.**
+
+### Crash dump (v2, `firmware/drivers/crashdump.{h,c}`)
+
+- Any fatal error (HardFault/BusFault/MemManage/UsageFault, stack-guard overflow,
+  `k_panic`/`k_oops`) now records reason, PC/LR/xPSR, CFSR/HFSR/MMFAR/BFAR (captured before
+  Zephyr clears them), the thread name and its stack high-water mark in a retained RAM record
+  (`.noinit`, outside `.bss`, magic + CRC-32) and **resets within microseconds**: a crash is a
+  short click and a reboot, not 4 s of static.
+- A hang that still trips the watchdog: the watchdog interrupt (~61 us before the reset)
+  records the interrupted thread and its PC/LR.
+- At the next boot the console prints `CRASH: ...` at once and every 10 s, until it has been
+  printed 6 times to an open console (one minute); then it is cleared.
+- Assumption (unverified): RAM survives the watchdog reset and the TE bootloader. If it does
+  not, there is simply no `CRASH` line; `boots=` tells: it counts resets that kept RAM
+  (1 after power-on, 2+ after a crash reset if retention works).
+
+### New console fields (v2)
+
+```
+  diag stk audio=2310/6144 main=1650/4096 | apply_cyc max/last=61234/2210 n=9 inits=11 settle_ms=10 | blk_cyc_max=71002 | loop_gap_ms max/1s=12/10 starve=0 i2s_sleep=0 | torn=0 lay_err=0 boots=1
+CRASH: #1 cpu_exception reason=25 thread=audio(2002c1a0) pc=0002a1b4 lr=0002a0f1 xpsr=61000000 cfsr=00008200 hfsr=00000000 mmfar=00000000 bfar=2004a000 stack_unused=3020/6144 up=184522 ms boots=2
+```
+(Illustrative placeholders, **not measurements**.)
+
+| Field | Meaning | Expected |
+|---|---|---|
+| `stk audio=used/size main=used/size` | stack high-water (painted stacks) | audio < ~4,000, main < ~3,000 |
+| `apply_cyc max/last` | `engine_process()` cycles of blocks that took a new config or ran effect inits (since boot / last) | max well under 85,333 (one block); estimate <= ~80,000 incl. a 75 KB delay init |
+| `n`, `inits` | such blocks / effect inits since boot | grow on every preset change |
+| `settle_ms` | time from a preset post until all its effects were live; `PENDING` while not | 10-20 (2-3 blocks + 10 ms loop) |
+| `blk_cyc_max` | worst whole block since boot | < 85,333 |
+| `loop_gap_ms max/1s` | longest main-loop gap since boot / in the last second: the watchdog margin (feed is in the loop, limit 4,000) | ~10-20; anything > 500 is a near-miss worth reporting |
+| `starve` | times the audio thread had not waited for 32 blocks in a row and was forced to sleep 1 ms | **0**; > 0 = CPU overload (audio will glitch) |
+| `i2s_sleep` | I2S error recoveries (each sleeps 1 ms) | 0 |
+| `torn`, `lay_err` | mailbox copies retried / snapshot slots refused | `lay_err=0` always |
+| `boots` | resets that kept RAM (see crash dump) | 1 after power-on |
+| `CRASH: #n kind reason thread pc lr ...` | the previous boot died; `kind` = `cpu_exception`/`stack_overflow`/`oops`/`panic`/`arch`/`watchdog_hang`; `reason` = Zephyr `K_ERR_*` code (ARM codes >= 16 name the fault type) | absent |
+
+### Retest (owner)
+
+1. `cd ~/spfx/flash-ready && shasum -a 256 -c SHA256SUMS.usbaudio2`.
+2. Flash `sp1fx-usbaudio-in-v2.bin` (image A) as under "Flashing". Open the console.
+3. Computer volume low, headphones off your ears; play music.
+4. Wait 30 s on Clean. Then tap FUNCTION once every ~10 s through **all 6 presets and back to
+   Clean** (Dub Station, Boom Bap, House, Lo-Fi Tape, Ambient, Clean), twice.
+5. The console must show after every change: the `preset N:name ...` line, then status lines
+   with `settle_ms` 10-20 and no `PENDING`, `cpu%_max` < 100 for every preset, `starve=0`,
+   `lay_err=0`, `loop_gap_ms` max < 100, `under`/`err` not rising (a single underrun at a
+   change is acceptable but worth noting), and no `CRASH` line.
+6. Send me: the whole log; in particular 3 status lines per preset (CPU per preset is the
+   first real measurement of the effects) and the `diag` lines.
+7. **If it crashes again:** wait for it to come back (now ~1 s for a fault, ~4 s for a hang),
+   reopen the console, copy the `CRASH:` line (it repeats every 10 s for a minute) and the
+   `rr=` and `boots=` values. If there is no `CRASH` line but `rr=2`, RAM was not retained or
+   the hang had interrupts locked: send the last 20 lines before the silence.
+8. If A passes, repeat steps 2-6 with `sp1fx-usbaudio-io-v2.bin` (image B).
 
 ## HEARING SAFETY: read first
 
@@ -134,8 +241,8 @@ Image B's directory has only `CMakeLists.txt`, `prj_io.conf` (sets
 A's sources/Kconfig/prj.conf via CMake (the build script has no option for extra
 config files, so a second app directory is the switch).
 
-Sizes (Zephyr v4.3.1, SDK 0.17.4, `-O2`): A flash 99,932 B, RAM 185,704 B of 256 KiB;
-B flash 101,208 B, RAM 188,800 B. The engine pool is **150 KiB (153,600 B)** of
+Sizes (Zephyr v4.3.1, SDK 0.17.4, `-O2`), v2: A flash 104,280 B, RAM 193,336 B of
+256 KiB; B flash 105,620 B, RAM 196,424 B (v1: A 99,932 / 185,704, B 101,208 / 188,800). The engine pool is **150 KiB (153,600 B)** of
 that, so everything else (USB, rings, I2S slab, stacks, kernel) is ~32-35 KiB and
 ~73-75 KiB of RAM stays free. 150 KiB fits every factory preset; it rejects (by
 design, `docs/STATUS.md`) combinations such as "delay + two reverbs".
@@ -293,7 +400,8 @@ optional.
   implicit feedback to steer the host); if not, the drop/dup safeguard runs.
 - The audio thread (preemptive priority 0) running the engine does not starve the USB
   stack: Zephyr's USB threads are cooperative priority 8 and pre-empt it. A heavy
-  preset delays only the main loop (LEDs/console/watchdog feed, 4 s window).
+  preset delays only the main loop (LEDs/console/watchdog feed, 4 s window); since v2
+  a starvation guard forces a 1 ms sleep after 32 blocks without any wait (`starve=`).
 - The CS42L42 3.072 MHz clocking gives exactly 48 kHz LRCK (tone pitch confirmed by
   the owner; the exact ppm is unknown: `fb` will show it).
 - FUNCTION tap detection uses no debounce beyond the 10 ms loop and a 30 ms minimum
