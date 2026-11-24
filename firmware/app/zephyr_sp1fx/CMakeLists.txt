@@ -49,6 +49,7 @@ target_sources(app PRIVATE
   ${SP1FX_FW}/drivers/crashdump.c
   ${SP1FX_FW}/drivers/ladder.c
   ${SP1FX_FW}/drivers/midi_out.c
+  ${SP1FX_FW}/drivers/saadc_scan.c
   ${SP1FX_FW}/drivers/sync_hw.c
   ${SP1FX_FW}/protocol/protocol.c
   ${SP1FX_FW}/storage/config_store.c

@@ -19,8 +19,6 @@
  * reaches the settings pages.
  */
 
-#include <zephyr/dt-bindings/adc/adc.h>
-#include <zephyr/dt-bindings/adc/nrf-saadc.h>
 
 &slot0_partition {
 	reg = <0x00020000 0x000dd000>;
@@ -35,43 +33,12 @@
 	};
 };
 
-&adc {
-	channel@2 {
-		reg = <2>;
-		zephyr,gain = "ADC_GAIN_1_6";
-		zephyr,reference = "ADC_REF_INTERNAL";
-		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 20)>;
-		zephyr,input-positive = <NRF_SAADC_AIN3>;   /* fader 1, P0.05 */
-		zephyr,resolution = <12>;
-	};
-	channel@3 {
-		reg = <3>;
-		zephyr,gain = "ADC_GAIN_1_6";
-		zephyr,reference = "ADC_REF_INTERNAL";
-		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 20)>;
-		zephyr,input-positive = <NRF_SAADC_AIN6>;   /* fader 2, P0.30 */
-		zephyr,resolution = <12>;
-	};
-	channel@4 {
-		reg = <4>;
-		zephyr,gain = "ADC_GAIN_1_6";
-		zephyr,reference = "ADC_REF_INTERNAL";
-		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 20)>;
-		zephyr,input-positive = <NRF_SAADC_AIN2>;   /* fader 3, P0.04 */
-		zephyr,resolution = <12>;
-	};
-	channel@5 {
-		reg = <5>;
-		zephyr,gain = "ADC_GAIN_1_6";
-		zephyr,reference = "ADC_REF_INTERNAL";
-		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 20)>;
-		zephyr,input-positive = <NRF_SAADC_AIN7>;   /* fader 4, P0.31 */
-		zephyr,resolution = <12>;
-	};
-};
+/* rc3: the SAADC is driven at register level by firmware/drivers/saadc_scan.c (same channel
+ * setup as the controls image: ladders AIN0/AIN1, faders AIN3/AIN6/AIN2/AIN7, battery AIN4,
+ * gain 1/6, internal reference, 20 us, 12-bit). Zephyr's ADC driver is not built. */
+&adc { status = "disabled"; };
 
 &zephyr_user {
-	io-channels = <&adc 0>, <&adc 1>, <&adc 2>, <&adc 3>, <&adc 4>, <&adc 5>;
 	fn-gpios      = <&gpio0 27 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
 	btn-com-gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>;
 	osc-en-gpios  = <&gpio0 13 GPIO_ACTIVE_HIGH>;

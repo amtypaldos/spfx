@@ -71,6 +71,7 @@
 #include "drivers/controls_hw.h"
 #include "drivers/crashdump.h"
 #include "drivers/ladder.h"
+#include "drivers/saadc_scan.h"
 #include "drivers/midi_out.h"
 #include "drivers/sync_hw.h"
 #include "protocol/protocol.h"
@@ -102,8 +103,9 @@
 #define ENGINE_INIT_BUDGET (48u * 1024u)
 #define STARVE_IDLE_CYC  (CPU_HZ / 20000u)   /* 50 us */
 #define STARVE_RUN       32
-/* Overload guard limit: 85 % of the 64-frame period (85,333 cycles at 64 MHz), judged on
- * the MEAN over 32-block windows, 3 windows in a row (~128 ms; dsp/engine.h). */
+/* Overload guard limit: 85 % of the 64-frame period (85,333 cycles at 64 MHz) of ENGINE
+ * cycles, judged on the MEAN over 32-block windows, 3 windows in a row (~128 ms), or 2 windows
+ * over 9/8 of it; auto-recovery after ~10 s calm (dsp/engine.h). */
 #define OVERLOAD_LIMIT_CYC ((uint32_t)((uint64_t)BLK_FRAMES * CPU_HZ / FS_HZ * 85u / 100u))
 /* Quiet = 1.5 s of blocks with input and output below -66 dBFS (app_logic.h). */
 #define QUIET_BLOCKS     1125u
@@ -223,7 +225,8 @@ static volatile uint32_t g_apply_max, g_apply_blocks;
 static volatile uint32_t g_blk_max_all;
 static volatile uint32_t g_starve;
 static volatile uint32_t g_i2s_recover_sleep;
-static quiet_t g_quiet;                    /* audio thread writes, main reads one word */
+static quiet_t g_quiet;
+static volatile uint8_t g_flash_busy;      /* main: a flash write/erase is in progress */                    /* audio thread writes, main reads one word */
 
 static float in_l[BLK_FRAMES], in_r[BLK_FRAMES];
 static float out_l[BLK_FRAMES], out_r[BLK_FRAMES];
@@ -380,7 +383,14 @@ static void audio_thread(void *a, void *b, void *c)
 		render_block(blk, &ec, &ipk, &opk);
 
 		bc = DWT->CYCCNT - tb;
-		(void)engine_overload_feed(&eng, bc, OVERLOAD_LIMIT_CYC);
+		/* rc3: the guard judges the ENGINE's cycles (what shedding can reduce); rc2 judged
+		 * the whole block, which includes USB/ISR pre-emption (~25 % on the device) and shed
+		 * effects on USB/flash bursts. Blocks during a flash write (CPU stalls) are skipped. */
+		if (g_flash_busy) {
+			engine_overload_skip(&eng);
+		} else {
+			(void)engine_overload_feed(&eng, ec, OVERLOAD_LIMIT_CYC);
+		}
 		quiet_feed(&g_quiet, ipk, opk);
 		g_frames += BLK_FRAMES;
 		sup_audio_tick();
@@ -895,6 +905,7 @@ static int fl_write(void *uctx, uint32_t page, uint32_t off, const void *buf, ui
 
 	stage(ST_FLASH_W);
 	g_flash_ops++;
+	g_flash_busy = 1;
 
 	for (uint32_t i = 0; i < len; i += FLASH_CHUNK) {
 		const uint32_t n = MIN(FLASH_CHUNK, len - i);
@@ -902,6 +913,7 @@ static int fl_write(void *uctx, uint32_t page, uint32_t off, const void *buf, ui
 
 		if (rc != 0) {
 			g_flash_end_ms = k_uptime_get_32();
+			g_flash_busy = 0;
 			stage(prev);
 			return rc;
 		}
@@ -911,6 +923,7 @@ static int fl_write(void *uctx, uint32_t page, uint32_t off, const void *buf, ui
 	const uint32_t ms = (uint32_t)(k_uptime_get() - t0);
 
 	g_flash_end_ms = k_uptime_get_32();
+	g_flash_busy = 0;
 	stage(prev);
 
 	st_write_ms_max = MAX(st_write_ms_max, ms);
@@ -933,6 +946,7 @@ static int fl_erase(void *uctx, uint32_t page)
 
 	stage(ST_FLASH_E);
 	g_flash_ops++;
+	g_flash_busy = 1;
 	engine_set_duck(&eng, 1);
 	wait_fed(30);                      /* engine duck: ~20 ms to silence */
 	const uint32_t err0 = g_err, und0 = out_cons.underruns;
@@ -945,6 +959,7 @@ static int fl_erase(void *uctx, uint32_t page)
 	const uint32_t ms = (uint32_t)(k_uptime_get() - t0);
 
 	g_flash_end_ms = k_uptime_get_32();
+	g_flash_busy = 0;
 	wait_fed(10);
 	engine_set_duck(&eng, 0);
 	stage(prev);
@@ -1163,6 +1178,12 @@ static void sync_thread(void *a, void *b, void *c)
 
 /* ------------------------------ controls --------------------------------- */
 static controller_t ui;
+static boot_mode_t g_boot_mode;
+static volatile uint32_t g_ctl_ticks, g_ctl_scans;   /* controls alive: loop ticks, good scans */
+static volatile int16_t g_batt_raw = -1;             /* AIN4 battery divider, raw 12-bit */
+static int16_t g_lad_raw[2] = { -1, -1 };            /* last raw ladder codes (diag) */
+static uint16_t g_btn_mask;                          /* last button mask given to the controller */
+static bool g_fn_armed;                              /* FN counts (released once since boot) */
 static ladder_t lad1, lad2;
 static fader_t fad[4];
 static int hw_rc = 1;
@@ -1229,6 +1250,127 @@ static unsigned int stack_used(k_tid_t t, unsigned int *size)
 		return 0u;
 	}
 	return *size - (unsigned int)unused;
+}
+
+/* ---------------------------- charger (BQ24232) ---------------------------- */
+/* Pins: SP-1-dev wiki "Battery charger" (MIT) and chattock/sp1-tape-looper charger_init()
+ * (MIT): /CE P0.21 (active low = charging enabled), /CHG P0.22 (open drain, low = charging),
+ * /PGOOD P0.24 (open drain, low = USB power good). The charger charges on its own while /CE
+ * is low; GPIO output levels are kept in System OFF (nRF52840 PS), so charging continues while
+ * off. Earlier sp1fx images never drove /CE (left at the bootloader's level). NOT TESTED ON
+ * HARDWARE. */
+#define BQ_NCE   21u
+#define BQ_NCHG  22u
+#define BQ_NPGD  24u
+
+static void charger_init(void)
+{
+	NRF_P0->PIN_CNF[BQ_NCHG] = (GPIO_PIN_CNF_DIR_Input << GPIO_PIN_CNF_DIR_Pos) |
+				   (GPIO_PIN_CNF_PULL_Pullup << GPIO_PIN_CNF_PULL_Pos) |
+				   (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos);
+	NRF_P0->PIN_CNF[BQ_NPGD] = (GPIO_PIN_CNF_DIR_Input << GPIO_PIN_CNF_DIR_Pos) |
+				   (GPIO_PIN_CNF_PULL_Pullup << GPIO_PIN_CNF_PULL_Pos) |
+				   (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos);
+	NRF_P0->OUTCLR = 1u << BQ_NCE;   /* low first, then output: charging enabled */
+	NRF_P0->PIN_CNF[BQ_NCE] = (GPIO_PIN_CNF_DIR_Output << GPIO_PIN_CNF_DIR_Pos) |
+				  (GPIO_PIN_CNF_DRIVE_S0S1 << GPIO_PIN_CNF_DRIVE_Pos) |
+				  (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos);
+	NRF_P0->OUTCLR = 1u << BQ_NCE;
+}
+
+static bool usb_vbus(void);
+
+static bool usb_power(void)
+{
+	return usb_vbus() || (NRF_P0->IN & (1u << BQ_NPGD)) == 0u;
+}
+
+static bool charging(void)
+{
+	return (NRF_P0->IN & (1u << BQ_NCHG)) == 0u;
+}
+
+static uint8_t proto_power_flags(void *uctx)
+{
+	ARG_UNUSED(uctx);
+	return (uint8_t)((usb_power() ? 2u : 0u) | (charging() ? 4u : 0u));
+}
+
+static FUNC_NORETURN void system_off_now(void)
+{
+	controls_hw_leds_off();
+	saadc_scan_off();
+	controls_hw_rail(false);
+	controls_hw_arm_fn_wake();
+	(void)irq_lock();
+	feed_wdt();
+	NRF_POWER->RESETREAS = 0xFFFFFFFFu;
+	__DSB();
+	NRF_POWER->SYSTEMOFF = 1u;
+	__DSB();
+	for (;;) {
+	}
+}
+
+/* Charge standby (app_logic.h boot_decide): the device looks off -- no USB device, no audio
+ * -- until FUNCTION is held 4 s (8-LED fill, one per 0.5 s: PLAY-side LEDs, then T1..T4).
+ * Released earlier: the fill is cleared; on battery the unit goes straight back to System OFF;
+ * on USB power it stays here and shows the charge state on the first PLAY-side LED: slow
+ * gentle pulse while charging, steady dim when the charger reports done. NOT TESTED ON
+ * HARDWARE. */
+static void standby(void)
+{
+	uint32_t held = 0, t = 0;
+	/* seeded from the pin: a FN wake arrives with FN already held (starting from "released"
+	 * would send a battery unit straight back to System OFF before the debounce saw it) */
+	int down = controls_hw_fn_pressed() ? 1 : 0;
+	int cnt = 0;
+	led_frame_t f;
+
+	for (;;) {
+		feed_wdt();
+		/* FN debounced: 3 differing reads in a row (30 ms) change the state */
+		const int raw = controls_hw_fn_pressed() ? 1 : 0;
+
+		cnt = (raw != down) ? cnt + 1 : 0;
+		if (cnt >= 3) {
+			down = raw;
+			cnt = 0;
+			held = 0;
+		}
+		const bool usb = usb_power();
+		const sb_action_t a = standby_step(down, usb, held);
+
+		if (a == SB_BOOT) {
+			controller_fill_leds(8, &f);
+			controls_hw_leds(f.track, f.play);
+			wait_fed(300);
+			controller_fill_leds(0, &f);
+			controls_hw_leds(f.track, f.play);
+			return;
+		}
+		if (a == SB_OFF) {
+			system_off_now();
+		}
+		if (down) {
+			controller_fill_leds(holdfill_count(held), &f);
+		} else {
+			controller_fill_leds(0, &f);
+			if (usb) {
+				/* 2.4 s triangle 8..90 while charging; steady 40 when done */
+				const uint32_t ph = t % 2400u;
+				const uint32_t tri = ph < 1200u ? ph : 2400u - ph;
+
+				f.play[0] = charging() ? (uint8_t)(8u + tri * 82u / 1200u) : 40u;
+			}
+		}
+		controls_hw_leds(f.track, f.play);
+		k_msleep(10);
+		t += 10u;
+		if (down) {
+			held += 10u;
+		}
+	}
 }
 
 /* ---------------------------- stall supervisor ---------------------------- */
@@ -1404,6 +1546,15 @@ static FUNC_NORETURN void power_off(void)
 	g_sup_on = 0;               /* the FN-release wait below is not a stall */
 	crashdump_stall_clear();
 	stage(ST_POWEROFF);
+	{
+		/* the 8th LED of the fill lights at 4.0 s together with the power off: show all
+		 * eight for 0.3 s so the end of the count is visible, then dark */
+		led_frame_t f;
+
+		controller_fill_leds(8, &f);
+		controls_hw_leds(f.track, f.play);
+		wait_fed(300);
+	}
 	controls_hw_leds_off();
 	/* save unsaved settings first (audio is going away, an erase is fine now) */
 	if (store_ok && (deb.dirty || ssched.pending)) {
@@ -1439,17 +1590,16 @@ static FUNC_NORETURN void power_off(void)
 	}
 	wait_fed(FN_RELEASE_MS);
 	controls_hw_leds_off();
-	controls_hw_rail(false);
-	controls_hw_arm_fn_wake();
-
-	(void)irq_lock();
-	feed_wdt();
-	NRF_POWER->RESETREAS = 0xFFFFFFFFu;
-	__DSB();
-	NRF_POWER->SYSTEMOFF = 1u;
-	__DSB();
-	for (;;) {
+	if (usb_power()) {
+		/* plugged in: System OFF would have no wake edge for a later unplug/replug and
+		 * would hide the charge state; soft-reset into the charge standby instead
+		 * (Tape Looper does the same). The retained flag makes it standby, not a boot. */
+		saadc_scan_off();
+		crashdump_set_poweroff_flag();
+		feed_wdt();
+		NVIC_SystemReset();
 	}
+	system_off_now();
 }
 
 /* ------------------------------ diagnostics ------------------------------ */
@@ -1578,11 +1728,16 @@ static void log_diag(uint32_t now, bool detail)
 	struct a_snap a = { 0 };
 	const bool a_ok = snap_read(&a_seq, &a_pub, &a, sizeof(a));
 	const uint32_t fin = g_usb_frames_in, sof = g_sof_count, b = g_blocks;
+	saadc_scan_stats_t dsst;
+
+	saadc_scan_stats(&dsst, now);
 
 	con_printf("D t=%u preset=%d:%s cpu%%_avg/max=%u.%u/%u.%u blk%%_avg/max=%u.%u/%u.%u%s "
 		   "ovh_max=%u spikes>85%%=%u ovl win=%u.%u%% win_max_period=%u.%u%% max=%u.%u%% "
 		   "shed=0x%x forced=%u "
-		   "vol=%d dB\r\n",
+		   "vol=%d dB\r\n"
+		   "  ctl ticks=%u scans=%u scan_age_ms=%u lad_raw=%d,%d fad_raw=%d,%d,%d,%d btn=0x%03x "
+		   "deb=0x%03x fn: gpio=%d armed=%d down=%d consumed=%d long=%d mode=%s%d held_slot=%d\r\n",
 		   now / 1000u, ui.preset_idx + 1, preset_name(ui.preset_idx),
 		   pct10(a.cyc_avg) / 10, pct10(a.cyc_avg) % 10, pct10(a.cyc_max) / 10,
 		   pct10(a.cyc_max) % 10, pct10(a.blk_avg) / 10, pct10(a.blk_avg) % 10,
@@ -1591,7 +1746,13 @@ static void log_diag(uint32_t now, bool detail)
 		   pct10(eng.diag.ovl_last_mean) / 10, pct10(eng.diag.ovl_last_mean) % 10,
 		   pct10(ovl_period_max) / 10, pct10(ovl_period_max) % 10,
 		   pct10(eng.diag.ovl_max_mean) / 10, pct10(eng.diag.ovl_max_mean) % 10,
-		   eng.diag.shed_mask, eng.diag.forced_bypass, idb(vol_master_db(eng.cfg.master)));
+		   eng.diag.shed_mask, eng.diag.forced_bypass, idb(vol_master_db(eng.cfg.master)),
+		   (unsigned int)g_ctl_ticks, (unsigned int)g_ctl_scans, (unsigned int)dsst.age_ms,
+		   g_lad_raw[0], g_lad_raw[1], (int)fad[0].held, (int)fad[1].held, (int)fad[2].held,
+		   (int)fad[3].held, g_btn_mask, ui.deb.stable, controls_hw_fn_pressed() ? 1 : 0,
+		   g_fn_armed ? 1 : 0, ui.gest.fn_down, ui.gest.fn_consumed, ui.gest.fn_long_sent,
+		   ui.mode == UI_EDIT ? "EDIT" : "PERF", ui.mode == UI_EDIT ? ui.edit_slot + 1 : 0,
+		   ui.held_slot);
 	con_printf("  usb out=%s play=%d fill_min/avg/max=%u/%u/%u rx_f/s=%u sof/s=%u under=%u "
 		   "ovr=%u dup=%u drop=%u | in_pk=%u out_pk=%u (x1e-3) in_clip=%u out_clip=%u "
 		   "sat16=%u | i2s blk/s=%u err=%u rec=%u | out=%s hp=%d quiet=%u\r\n",
@@ -1639,7 +1800,7 @@ static void log_diag(uint32_t now, bool detail)
 	con_printf("  info fw=%s stk audio=%u/%u main=%u/%u sync=%u/%u apply_cyc_max=%u "
 		   "blk_cyc_max=%u starve=%u torn=%u lay_err=%u boots=%u rr=%x hw=%d adc=%d "
 		   "pwm_rel=0x%x cs42=%s tas=%s usb=%d trim=%d dB stalls=%u stall_max_ms=%u "
-		   "vbus=%d save_busy=%u cdc_tx=%u cdc_rx=%u txq_max=%u\r\n",
+		   "vbus=%d pgood=%d charging=%d boot=%s save_busy=%u cdc_tx=%u cdc_rx=%u txq_max=%u\r\n",
 		   FW_VERSION, a_used, a_sz, m_used, m_sz, s_used, s_sz,
 		   (unsigned int)g_apply_max, (unsigned int)g_blk_max_all, (unsigned int)g_starve,
 		   (unsigned int)eng.diag.torn_retries, (unsigned int)eng.diag.layout_errors,
@@ -1648,20 +1809,28 @@ static void log_diag(uint32_t now, bool detail)
 		   cs42_cfg_ok ? "ok" : (cs42_ok ? "cfg-fail" : "absent"),
 		   tas_cfg_ok ? "ok" : (tas_ok ? "cfg-fail" : "absent"), usb_rc,
 		   CONFIG_SP1FX_OUT_TRIM_DB, (unsigned int)g_stall_count,
-		   (unsigned int)g_stall_max_ms, usb_vbus() ? 1 : 0, (unsigned int)st_busy,
+		   (unsigned int)g_stall_max_ms, usb_vbus() ? 1 : 0,
+		   (NRF_P0->IN & (1u << BQ_NPGD)) == 0u ? 1 : 0, charging() ? 1 : 0,
+		   g_boot_mode == BOOT_STANDBY ? "standby+4s" : "now", (unsigned int)st_busy,
 		   (unsigned int)cdc_tx_bytes, (unsigned int)cdc_rx_bytes,
 		   (unsigned int)ctx.q.max_used);
+	saadc_scan_stats_t sst;
+
+	saadc_scan_stats(&sst, now);
 	con_printf("  store ok=%d load=%d seq=%u page=%d saves=%u erases=%u errors=%u "
-		   "write_ms_max=%u erase_ms_max=%u deferred=%u dirty=%d pending=%d dedup=%u safe=%d "
-		   "adc_to=%u adc_max_ms=%u | "
+		   "write_ms_max=%u erase_ms_max=%u deferred=%u dirty=%d pending=%d dedup=%u safe=%d | "
+		   "ctl ticks=%u scans=%u scan_age_ms=%u adc_to=%u start_fail=%u stop_fail=%u "
+		   "ppi_cleared=%u saadc_was_on=%u batt_raw=%d | "
 		   "sync on=%u hw=%u ticks=%u pulses=%u starts=%u | con drops=%u frames_drop=%u "
 		   "rx_drop=%u ev_drop=%u rx_frames=%u bad=%u\r\n",
 		   store_ok ? 1 : 0, st_load_rc, (unsigned int)store.seq, store.active_page,
 		   (unsigned int)st_saves, (unsigned int)st_erases, (unsigned int)st_errors,
 		   (unsigned int)st_write_ms_max, (unsigned int)st_erase_ms_max,
 		   (unsigned int)ssched.deferred, deb.dirty, ssched.pending, (unsigned int)st_dedup,
-		   safe_boot ? 1 : 0, (unsigned int)controls_hw_adc_timeouts(),
-		   (unsigned int)controls_hw_adc_max_ms(), proto.sync_on,
+		   safe_boot ? 1 : 0, (unsigned int)g_ctl_ticks, (unsigned int)g_ctl_scans,
+		   (unsigned int)sst.age_ms, (unsigned int)sst.timeouts, (unsigned int)sst.start_fail,
+		   (unsigned int)sst.stop_fail, (unsigned int)sst.ppi_cleared,
+		   (unsigned int)sst.was_enabled, (int)g_batt_raw, proto.sync_on,
 		   g_sync_hw_init, (unsigned int)g_sync_ticks, (unsigned int)g_sync_pulses,
 		   (unsigned int)g_sync_starts, (unsigned int)ctx.text_drops,
 		   (unsigned int)ctx.frame_drops, (unsigned int)rx_drops, (unsigned int)ev_rl.dropped,
@@ -1691,6 +1860,17 @@ int main(void)
 
 	/* controls: rail on, LEDs dark (PWM0/PWM1), SAADC channels */
 	hw_rc = controls_hw_init();
+	charger_init();
+	feed_wdt();
+	{
+		const int poff = crashdump_take_poweroff_flag();
+
+		g_boot_mode = boot_decide(sp1fx_boot_resetreas, crashdump_pending(), poff);
+		if (g_boot_mode == BOOT_STANDBY) {
+			standby();   /* returns only after FUNCTION was held 4 s */
+		}
+	}
+	saadc_scan_init();
 	feed_wdt();
 
 	(void)gpio_pin_configure_dt(&cs42_rst, GPIO_OUTPUT_ACTIVE);
@@ -1750,7 +1930,7 @@ int main(void)
 	const proto_config_t pc = {
 		.eng = &eng, .ctl = &ui, .sync = NULL, .deb = &deb, .tx = proto_tx,
 		.save = proto_save_now, .ctx = NULL, .fw = FW_VERSION, .block = BLK_FRAMES,
-		.bpm = boot_d.bpm, .sync_on = boot_d.sync_on,
+		.bpm = boot_d.bpm, .sync_on = boot_d.sync_on, .power_flags = proto_power_flags,
 	};
 
 	proto_init(&proto, &pc);
@@ -1833,8 +2013,9 @@ int main(void)
 	uint32_t seen_change = ui.change_seq;
 	bool was_text = false;
 	int hp_cand = -1, hp_cnt = 0;
-	controls_raw_t raw;
+	int16_t adc_raw[SAADC_SCAN_CH] = { 0 };
 	float fv[4] = { 0 };
+	uint16_t btn_seen = 0;
 	uint16_t lad_mask = 0;
 	bool stable_marked = false;
 	struct shadow sh;
@@ -1887,16 +2068,25 @@ int main(void)
 
 		/* ---- controls ---- */
 		stage(ST_ADC);
-		/* never waits for the SAADC (rc1 used the blocking adc_read: K_FOREVER) */
-		if (controls_hw_read_nb(&raw, now, ADC_TIMEOUT_MS) == 0) {
-			lad_mask = (uint16_t)(ladder_update(&lad1, raw.ladder1) |
-					      ladder_update(&lad2, raw.ladder2));
+		/* rc3: own register-level SAADC scan, never waits, restarts a lost scan
+		 * (rc1: Zephyr adc_read hung; rc2: an async scan never finished and latched) */
+		if (saadc_scan_poll(now, adc_raw)) {
+			lad_mask = (uint16_t)(ladder_update(&lad1, adc_raw[0]) |
+					      ladder_update(&lad2, adc_raw[1]));
 			for (int i = 0; i < 4; i++) {
-				fv[i] = fader_update(&fad[i], raw.fader[i]);
+				fv[i] = fader_update(&fad[i], adc_raw[2 + i]);
 			}
+			g_batt_raw = adc_raw[6];
+			g_lad_raw[0] = adc_raw[0];
+			g_lad_raw[1] = adc_raw[1];
+			g_ctl_scans++;
 		}
-		g_crumbs[3] = (controls_hw_adc_stuck() ? 2u : 0u) |
-			      (controls_hw_adc_timeouts() << 8);
+		{
+			saadc_scan_stats_t ss_;
+
+			saadc_scan_stats(&ss_, now);
+			g_crumbs[3] = (ss_.timeouts << 8) | (ss_.age_ms > 200u ? 2u : 0u);
+		}
 		stage(ST_CONTROLLER);
 		uint16_t buttons = lad_mask;
 		const bool fnp = controls_hw_fn_pressed();
@@ -1908,6 +2098,16 @@ int main(void)
 			buttons |= BTN_BIT(BTN_FN);
 		}
 		controller_tick(&ui, now, buttons, fv);
+		g_ctl_ticks++;
+		g_btn_mask = buttons;
+		g_fn_armed = fn_armed;
+		if (buttons != btn_seen) {
+			char nm[48];
+
+			ladder_mask_names(buttons, nm, sizeof(nm));
+			EV_PRINTF("B %u buttons=%s\r\n", now, nm);
+			btn_seen = buttons;
+		}
 		if (ui.power_off_request) {
 			power_off();
 		}
@@ -1944,6 +2144,11 @@ int main(void)
 		led_frame_t f;
 
 		controller_leds(&ui, now, &f);
+		/* charging while running: a short dim blip on the 4th PLAY-side LED every 4 s, only
+		 * when nothing else uses that LED */
+		if (charging() && f.play[3] == 0u && (now % 4000u) < 120u) {
+			f.play[3] = 40u;
+		}
 		controls_hw_leds(f.track, f.play);
 		/* output-level LEDs read diag.out_peak: let it decay (half-life ~110 ms) */
 		eng.diag.out_peak *= 0.95f;
