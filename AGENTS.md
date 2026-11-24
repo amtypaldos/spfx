@@ -8,4 +8,5 @@ Rules:
 - Label every claim: verified on hardware / source finding / simulated / untested assumption. Never fabricate hardware results.
 - Pin every upstream to a commit; record license in THIRD_PARTY_NOTICES.md. Do not copy softmodded/marisko (no license).
 - No dynamic allocation, logging, or storage writes in the audio path.
-- Current state: see docs/PHASE0_REPORT.md. The analog-input feasibility gate failed; the input transport awaits a user decision.
+- Current state: docs/STATUS.md. Analog input is impossible on this hardware (docs/PHASE0_REPORT.md); the decided routing is USB audio in/out + headphone out + sync-jack out (docs/ADR-001, ADR-002).
+- Companion and firmware must follow docs/PROTOCOL.md; change the spec first if they disagree.
