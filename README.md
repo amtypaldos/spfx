@@ -8,7 +8,7 @@ This is an unofficial hobby project. It is not affiliated with, endorsed by, or 
 
 **Development firmware. Only bring-up images have run on the owner's hardware, and nothing here is production-ready.** The evidence labels follow `docs/STATUS.md`.
 
-**Newest image: `sp1fx-v1-rc2.bin`, the integrated firmware (`firmware/app/zephyr_sp1fx`). Built and host-tested, NOT RUN ON HARDWARE yet.** rc1 reset by watchdog every few seconds on hardware; rc2 removes the suspected causes and records where a remaining hang happens (`docs/STATUS.md`). It combines USB audio + effects, buttons/faders/LEDs, VOL+/VOL- volume (2 dB steps, saved), the companion protocol on the USB serial port, settings saved to internal flash (0xFD000-0xFEFFF), and the sync jack (off by default, untested with gear). Owner test plan: `docs/BRINGUP_SP1FX.md`.
+**Newest image: `sp1fx-v1-rc3.bin`, the integrated firmware (`firmware/app/zephyr_sp1fx`). Built and host-tested, NOT RUN ON HARDWARE yet.** rc1 reset by watchdog every few seconds on hardware; rc2 removes the suspected causes and records where a remaining hang happens (`docs/STATUS.md`). It combines USB audio + effects, buttons/faders/LEDs, VOL+/VOL- volume (2 dB steps, saved), the companion protocol on the USB serial port, settings saved to internal flash (0xFD000-0xFEFFF), and the sync jack (off by default, untested with gear). Owner test plan: `docs/BRINGUP_SP1FX.md`.
 
 **Verified on hardware** (owner-observed, spare unit, 2026-11-24; see `docs/STATUS.md`):
 
@@ -35,7 +35,7 @@ Text summary of the controls, for readers who cannot see the image:
 - **FN + T1-T4:** enter edit mode for that slot. **Tap FN again** to return to performance mode.
 - **FN + FWD/REV:** previous or next preset. Holding repeats.
 - **PLAY tap:** global bypass. A single LED walks across the track LEDs while bypassed.
-- **FN hold 1.5 s:** power off, return to the bootloader.
+- **FN hold 3 s (alone):** power off; the PLAY-side LEDs fill up during the last second. Pressing any other button during the hold cancels it. (1.5 s in the older images; the guide image still says 1.5 s, the HTML source is updated.)
 - **VOL- / VOL+:** master volume, 2 dB per press (-60 to 0 dB), shown as a bar on the PLAY-side LEDs. Holding repeats. Saved. (The guide image still says 16 steps; the HTML source is updated.)
 - **Soft takeover:** when a fader changes role, its value does not jump. Its LED blinks while you move it toward the stored value. A bright flash on a dim base means move up. A bright blink with a dark gap means move down. A steady LED means picked up.
 - **LEDs beside PLAY:** output level, or a flashing row when a change is refused (for example, an effect that does not fit the DSP memory or CPU budget).
@@ -146,7 +146,8 @@ Staged images are kept outside the repository, in `~/spfx/flash-ready/`. They ar
 | `sp1fx-usbaudio-io-v2.bin` | USB audio in and return to host, B, v2. Not flashed yet. |
 | `sp1fx-usbaudio-in-v3.bin` | USB audio in, A, v3 (optimised DSP, overload guard). Runs on the owner's unit (presets ~50 % CPU). |
 | `sp1fx-v1-rc1.bin` | Integrated firmware rc1. **Resets by watchdog on hardware.** Superseded. |
-| `sp1fx-v1-rc2.bin` | **Integrated firmware rc2** (reset fixes + stall recorder). Not run on hardware yet. Test plan: `docs/BRINGUP_SP1FX.md`. |
+| `sp1fx-v1-rc2.bin` | Integrated firmware rc2 (reset fixes + stall recorder). Ran on the owner's unit; FN-hold power off too easy to hit. Superseded. |
+| `sp1fx-v1-rc3.bin` | **Integrated firmware rc3**: power off needs FN alone for 3 s with an LED countdown. Not run on hardware yet. Test plan: `docs/BRINGUP_SP1FX.md`. |
 | `RECOVERY-tape-looper-from-repo.bin` | Tape Looper release, recovery only. Not built from this repository. |
 
 Bring-up procedures and pass/fail checklists are in `docs/BRINGUP_SP1FX.md` (integrated firmware), `docs/BRINGUP_TONE.md`, `docs/BRINGUP_CONTROLS.md`, `docs/BRINGUP_SYNC.md` and `docs/BRINGUP_USBAUDIO.md`.

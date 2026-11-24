@@ -1,4 +1,35 @@
-# SP-1 FX v1: integrated firmware bring-up (rc2 current)
+# SP-1 FX v1: integrated firmware bring-up (rc3 current)
+
+## rc3 (2026-11-24): power-off hold 3 s with LED countdown -- NOT RUN ON HARDWARE
+
+| | |
+|---|---|
+| File | `~/spfx/flash-ready/sp1fx-v1-rc3.bin` (ELF: `sp1fx-v1-rc3.elf`) |
+| SHA-256 | `57cbe11bd401bc8d621652a408ccbb34dbe0ff2265edcd6655defb15fe230992` (in `SHA256SUMS`) |
+| Size | 152,852 B at 0x20000, `check_image.py` PASS, two clean builds identical |
+
+rc2 on hardware: the "crash" the owner saw while cycling presets was the **FN-hold power off**
+(console: `POWER OFF`, `stalls=0`, no CRASH), not a hang. rc3 changes only that, plus one diag
+field:
+- **Power off = FUNCTION held alone for 3 s** (was 1.5 s). During the last second the four
+  PLAY-side LEDs fill up one by one (1, 2, 3, 4 lit); release FUNCTION before all four are
+  lit and nothing happens.
+- **Any other button pressed during the same FUNCTION press cancels the power off for that
+  press** (rocker, channel, PLAY, VOL). In rc2 FN + rocker already cancelled it, but only
+  from the moment the rocker was pressed: holding FN 1.5 s before or between rocker presses
+  powered off. Host-tested: FN down, 1.2 s, rocker tap, FN held 3 s more: no power off.
+- After a power off the next FUNCTION press wakes the chip into the TE bootloader, which then
+  starts the app (unchanged, intended: it is the only way back on).
+- `D` line: `win_max_period=` = the worst 42.7 ms guard window since the previous `D` line
+  (next to `win=` last window and `max=` since boot).
+
+rc3 test: as rc2 below; additionally hold FN alone and watch the countdown (release at 2-3
+LEDs: no power off; keep holding: power off at 3 s), and cycle presets with FN held for
+several seconds between rocker presses: no power off.
+
+---
+
+# rc2 (superseded by rc3)
 
 ## rc2 (2026-11-24): fixes for the rc1 watchdog resets -- NOT RUN ON HARDWARE
 
@@ -133,7 +164,7 @@ Line types (copy whole lines into your report):
 | `SAVE (...) rc=0 seq= page= slot= took N ms` | a settings record was written |
 | `FLASH erase page 0x... took N ms (ducked) i2s_err+.. usb_under+..` | a flash page erase ran |
 | `CRASH: ...` | the previous run crashed (printed every 10 s for a minute) |
-| `POWER OFF: ...` | FN held 1.5 s |
+| `POWER OFF: ...` | FN held alone 3 s (rc3; 1.5 s in rc1/rc2) |
 
 ## LEDs (monochrome, no numbers)
 
@@ -172,7 +203,7 @@ current volume** and the sync on/off state; it sets the preset's tempo.
 3. Open the console. Report the `I` line and the first `D`/`usb`/`threads` block. Expect
    `store_load=-1` on the very first boot, `cs42=ok tas=ok` in the `info` line, `i2s blk/s=750`.
 4. Wait 30 s: no reset (the `D t=` counter keeps rising, `boots=` in `info` stays the same).
-5. Hold FUNCTION 1.5 s: `POWER OFF` line, LEDs off. Press FUNCTION: the bootloader starts the
+5. Hold FUNCTION 3 s (rc3; the PLAY-side LEDs fill up in the last second): `POWER OFF` line, LEDs off. Press FUNCTION: the bootloader starts the
    app again (as with the earlier images; with USB plugged in it may stay dark until FUNCTION
    is pressed or USB is replugged, a known issue).
 
@@ -227,7 +258,7 @@ LED flash + bar; one Clean.
 3. Change things from the companion (an effect, wet, a parameter, BPM 100) and on the device
    (fader, VOL, FN + rocker): both sides stay in sync (device changes appear in the companion).
 4. **Persistence:** make a distinctive change (e.g. slot 1 = Bitcrusher, wet 70 %, volume
-   2 presses down), wait 5 s, then FN hold 1.5 s (power off) and FUNCTION to power on.
+   2 presses down), wait 5 s, then FN hold 3 s (power off) and FUNCTION to power on.
    Reconnect: the state must be restored. Also try: change something, wait 5 s, unplug USB
    (hard power loss if the battery is flat; otherwise just replug) and check again.
 5. Open `screen` again (companion closed). In the `store` line report `saves= erases=

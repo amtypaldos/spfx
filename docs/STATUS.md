@@ -2,7 +2,31 @@
 
 Evidence key: **[HW]** observed on the owner's SP-1 (owner-run; see the hardware log). **[HOST]** verified by automated tests on a development Mac. **[SRC]** from upstream source/docs or our own build output. **[UNTESTED]** built but never run. **[TODO]** not started. The integrated image v1-rc1 has **not** been run on an SP-1.
 
-## v1-rc2 (2026-11-24): rc1 watchdog-reset fixes -- NOT RUN ON HARDWARE
+## v1-rc3 (2026-11-24): FN power-off hold -- NOT RUN ON HARDWARE
+
+`sp1fx-v1-rc3.bin`, SHA-256 `57cbe11bd401bc8d621652a408ccbb34dbe0ff2265edcd6655defb15fe230992`,
+152,852 B, check PASS, reproducible, 0 warnings, all host tests pass.
+
+**rc2 on hardware [HW, owner-run, console read live by the lead]:** ran steadily (`stalls=0`,
+no CRASH/STALL; threads: audio 60 %, USB/other 21 %, main 1.4 %, idle 17 %). The owner's
+"crash" (audio stopped, Mac lost the device) was the FN-hold power off firing while cycling
+presets with FN + rocker (`POWER OFF` line). Whether rc2 fixed the rc1 watchdog resets is
+not settled by this one session, but none occurred in it.
+CPU with the owner's heavy saved state [HW]: engine `cpu` 48 % average, whole block 73 %
+average, guard window max 94 %: close to the guard (85 % mean for 3 windows / ~96 % for one
+window). No shed was reported. rc3 adds `win_max_period=` to the `D` line to watch this.
+First-boot default [SRC]: with no saved settings all four slots are bypassed, and bypassed
+slots are not processed (pass-through, same CPU as Clean), so no change there; the heavy
+state was the owner's own saved configuration.
+
+rc3 changes [HOST]: power off needs FN held **alone** for 3 s (was 1.5 s) with a 4-LED
+countdown in the last second; any other button pressed during the same FN press (rocker,
+channel, PLAY, VOL) cancels it for that press (rc2 only cancelled from the rocker press on;
+VOL did not cancel at all). Wake from power off = next FN press into the TE bootloader
+(unchanged, intended). Tests: countdown, 3 s threshold, the owner's sequence (FN, 1.2 s,
+rocker tap, FN 3 s more: no power off), FN + rocker auto-repeat, FN + VOL/channel/PLAY.
+
+## v1-rc2 (2026-11-24): rc1 watchdog-reset fixes
 
 `sp1fx-v1-rc2.bin`, SHA-256 `3ccf3c8ed9fee5de1276e1f26034cd33dd52f893120aa0c6eee27654a2a8f250`,
 152,636 B, `check_image.py` PASS, reproducible, 0 warnings. Test plan: top of `docs/BRINGUP_SP1FX.md`.
@@ -209,6 +233,7 @@ Next: owner runs fxprof -> replace the declared values with measured ones.
 - Minimal image: when USB is plugged in, FN-hold enters SYSTEM_OFF and the device may stay dark until FN is pressed or USB is replugged (Tape Looper soft-resets instead). Pins, PWM ownership of the LED pin, and watchdog-channel assumptions are unverified guesses from Tape Looper's source.
 
 ## Hardware log (owner-reported; no automated evidence)
+- 2026-11-24 (owner-run, console read live by the lead): `sp1fx-v1-rc2.bin` runs steadily (stalls=0, no crash); FN-hold power off (1.5 s) fired by accident while cycling presets -> rc3.
 - 2026-11-24 (owner-run, console read by the lead): `sp1fx-v1-rc1.bin` resets by watchdog every ~6-20 s (see "v1-rc2" at the top). Superseded by rc2 (not yet run).
 - 2026-11-24: `sp1fx-min-heartbeat.bin` (SHA-256 18afab48...592667) flashed with Solderless to the spare unit; LED 1 blinks. This confirms: bootloader accepts an app linked at 0x20000, our reset/vector layout is valid, LED pin P0.29 is right.
 - 2026-11-24: `sp1fx-tone.bin` (SHA-256 87886d14...433f9): owner reports left channel low tone, right channel high tone, "sounds great". This confirms (owner-observed) the CS42L42/TAS2505 init, I2S slave clocking from the 3.072 MHz oscillator, and channel order. Not yet reported: which output was heard (speaker vs headphones), LEDs 2-4, serial status line, speaker mute on headphone insert, pop-free switching.
