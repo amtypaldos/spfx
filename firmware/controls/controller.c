@@ -195,14 +195,18 @@ void controller_tick(controller_t *c, uint32_t now, uint16_t buttons, const floa
 			const fx_desc *d = fx_get(id);
 			if (!d || i >= d->nparams) continue;
 			float old = c->eng->cfg.params[c->edit_slot][id][i];
+			if (v == old) continue; /* pickup at the stored value: nothing changed */
 			engine_set_param(c->eng, c->edit_slot, i, v);
 			float now_v = c->eng->cfg.params[c->edit_slot][id][i];
 			if (now_v != old) push_ev(c, CTL_EV_PARAM, c->edit_slot, i, 0, now_v);
 		} else {
 			float old = c->eng->cfg.wet[i];
+			if (v == old) continue; /* pickup at the stored value: nothing changed */
 			engine_set_wet(c->eng, i, v);
 			if (c->eng->cfg.wet[i] != old) push_ev(c, CTL_EV_WET, i, 0, 0, c->eng->cfg.wet[i]);
 		}
+		/* only real changes count (rc1 marked the settings dirty on every pickup, so every
+		 * boot wrote a record ~1.5 s after the faders were first read) */
 		changed(c, now);
 	}
 }
