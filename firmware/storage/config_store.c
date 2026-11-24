@@ -122,6 +122,13 @@ static int slot_blank(store_t *s, int page, int slot)
 	return 1;
 }
 
+static int page_blank(store_t *s, int page)
+{
+	for (int k = 0; k < (int)STORE_RECORDS_PER_PAGE; k++)
+		if (!slot_blank(s, page, k)) return 0;
+	return 1;
+}
+
 static void scan(store_t *s)
 {
 	uint32_t best = 0;
@@ -134,6 +141,7 @@ static void scan(store_t *s)
 	s->seq = best;
 	s->active_page = best_page;
 	s->need_rescan = 0;
+	s->spare_blank = -1;
 	if (best_page < 0) { s->next_slot = 0; return; }
 	/* next free slot: after the last slot that is not blank (a torn record counts as used) */
 	int last_used = best_slot;
@@ -179,10 +187,12 @@ int store_save(store_t *s, const store_data_t *d)
 		for (int k = 0; k < (int)STORE_RECORDS_PER_PAGE; k++)
 			if (!slot_blank(s, 0, k)) { if (s->f.erase(s->f.ctx, 0) != 0) { s->need_rescan = 1; return -1; } break; }
 	} else if (slot >= (int)STORE_RECORDS_PER_PAGE) {
-		/* page full: the other page only holds older records, so it is safe to erase */
+		/* page full: the other page only holds older records, so it is safe to erase
+		 * (skipped when it is already blank, e.g. pre-erased by store_erase_spare) */
 		page = 1 - page; slot = 0;
-		if (s->f.erase(s->f.ctx, (uint32_t)page) != 0) { s->need_rescan = 1; return -1; }
+		if (!page_blank(s, page) && s->f.erase(s->f.ctx, (uint32_t)page) != 0) { s->need_rescan = 1; return -1; }
 	}
+	int switched = page != s->active_page;
 
 	uint32_t seq = s->seq + 1;
 	put32(rec, MAGIC);
@@ -199,6 +209,36 @@ int store_save(store_t *s, const store_data_t *d)
 	s->seq = seq;
 	s->active_page = page;
 	s->next_slot = slot + 1;
+	if (switched) s->spare_blank = -1; /* the old page (now spare) holds older records */
+	return 0;
+}
+
+int store_save_needs_erase(store_t *s)
+{
+	if (s->need_rescan) scan(s);
+	if (s->active_page < 0) return !page_blank(s, 0);
+	if (s->next_slot < (int)STORE_RECORDS_PER_PAGE) return 0;
+	if (s->spare_blank < 0) s->spare_blank = page_blank(s, 1 - s->active_page);
+	return !s->spare_blank;
+}
+
+int store_spare_needs_erase(store_t *s)
+{
+	if (s->need_rescan) scan(s);
+	if (s->active_page < 0) return 0;
+	if (s->spare_blank < 0) s->spare_blank = page_blank(s, 1 - s->active_page);
+	return !s->spare_blank;
+}
+
+int store_erase_spare(store_t *s)
+{
+	if (s->need_rescan) scan(s);
+	if (s->active_page < 0) return 0;
+	if (s->f.erase(s->f.ctx, (uint32_t)(1 - s->active_page)) != 0) {
+		s->need_rescan = 1;
+		return -1;
+	}
+	s->spare_blank = 1;
 	return 0;
 }
 

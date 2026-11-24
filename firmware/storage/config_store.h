@@ -40,6 +40,7 @@ typedef struct {
 	int active_page;   /* page holding the newest record, -1 if none */
 	int next_slot;     /* next free record slot in active_page */
 	int need_rescan;
+	int spare_blank;   /* the page that is not active_page: 1 blank, 0 not blank, -1 unknown */
 } store_t;
 
 uint32_t sp1fx_crc32(const uint8_t *p, uint32_t n); /* standard CRC-32 (zlib) */
@@ -54,6 +55,20 @@ int store_init(store_t *s, flash_ops_t ops);
 int store_load(store_t *s, store_data_t *out);
 /* 0 ok, <0 flash error (state stays recoverable; the next save rescans) */
 int store_save(store_t *s, const store_data_t *d);
+
+/* ---- erase scheduling (a page erase stalls the nRF52 CPU ~85 ms; see ADR-003) ----
+ * A save normally only appends a record (no erase). It erases a page only (a) on the very
+ * first save when page 0 holds foreign data, or (b) when the active page is full and the
+ * other page is not blank. To keep (b) out of normal use, the firmware pre-erases the spare
+ * page at a moment when the stall cannot be heard: store_spare_needs_erase() says whether
+ * there is anything to do, store_erase_spare() does it. Pre-erasing the spare page is always
+ * safe: it never holds the newest record. */
+/* 1 if the next store_save() would erase a page first. */
+int store_save_needs_erase(store_t *s);
+/* 1 if a valid newest record exists and the other page is not blank. */
+int store_spare_needs_erase(store_t *s);
+/* Erase the spare page (no-op returning 0 if there is no newest record yet). <0 flash error. */
+int store_erase_spare(store_t *s);
 
 /* ---- write debouncing: wear control, called from the control thread ---- */
 #define STORE_QUIET_MS 1500u       /* wait this long after the last change */

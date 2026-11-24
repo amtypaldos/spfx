@@ -184,7 +184,9 @@ static void test_power_loss_during_erase(void)
 	blank();
 	store_t s; store_data_t d, out;
 	store_init(&s, ops());
-	for (int i = 0; i < 8; i++) { d = sample(i); CHECK(store_save(&s, &d) == 0); } /* page 0 now full */
+	/* both pages full (the first switch goes to a blank page and needs no erase) */
+	for (int i = 0; i < 16; i++) { d = sample(i); CHECK(store_save(&s, &d) == 0); }
+	CHECK(store_save_needs_erase(&s) == 1);
 	store_data_t last = d;
 	M.erase_cut = 1;
 	store_data_t nxt = sample(99);
@@ -195,6 +197,67 @@ static void test_power_loss_during_erase(void)
 	CHECK(store_save(&r, &nxt) == 0);
 	store_t r2; store_init(&r2, ops());
 	CHECK(store_load(&r2, &out) == 0 && same(&out, &nxt));
+}
+
+/* pre-erasing the spare page at a quiet moment keeps every later save erase-free */
+static void test_spare_pre_erase(void)
+{
+	blank();
+	store_t s; store_data_t d, out;
+	store_init(&s, ops());
+	/* blank flash: nothing to pre-erase, the first save needs no erase */
+	CHECK(store_spare_needs_erase(&s) == 0 && store_save_needs_erase(&s) == 0);
+	CHECK(store_erase_spare(&s) == 0 && M.erases[0] + M.erases[1] == 0);
+	/* foreign data in page 0 and nothing valid: the first save must erase */
+	memset(M.page[0] + 100, 0x12, 8);
+	store_init(&s, ops());
+	CHECK(store_save_needs_erase(&s) == 1);
+	d = sample(0);
+	CHECK(store_save(&s, &d) == 0 && M.erases[0] == 1);
+	/* the fresh page 1 is blank: filling page 0 and switching needs no erase */
+	for (int i = 1; i < 8; i++) { CHECK(store_save_needs_erase(&s) == 0); d = sample(i); CHECK(store_save(&s, &d) == 0); }
+	CHECK(store_spare_needs_erase(&s) == 0);
+	CHECK(store_save_needs_erase(&s) == 0); /* page 0 full, page 1 blank */
+	d = sample(8);
+	CHECK(store_save(&s, &d) == 0 && s.active_page == 1 && M.erases[1] == 0);
+	/* now page 0 (old records) is the spare: it needs an erase, and so would the switch back */
+	CHECK(store_spare_needs_erase(&s) == 1);
+	for (int i = 9; i < 16; i++) { d = sample(i); CHECK(store_save(&s, &d) == 0); }
+	CHECK(store_save_needs_erase(&s) == 1);
+	/* pre-erase at a quiet moment: the newest record stays loadable, the switch is erase-free */
+	uint32_t e0 = M.erases[0];
+	CHECK(store_erase_spare(&s) == 0 && M.erases[0] == e0 + 1);
+	CHECK(store_spare_needs_erase(&s) == 0 && store_save_needs_erase(&s) == 0);
+	{ store_t r; store_init(&r, ops()); CHECK(store_load(&r, &out) == 0 && same(&out, &d)); }
+	d = sample(16);
+	CHECK(store_save(&s, &d) == 0 && s.active_page == 0 && M.erases[0] == e0 + 1);
+	/* long run with a pre-erase after every save that left a dirty spare: saves never erase */
+	uint32_t save_erases = 0;
+	for (int i = 17; i < 600; i++) {
+		if (store_spare_needs_erase(&s)) CHECK(store_erase_spare(&s) == 0);
+		uint32_t before = M.erases[0] + M.erases[1];
+		CHECK(store_save_needs_erase(&s) == 0);
+		d = sample(i);
+		CHECK(store_save(&s, &d) == 0);
+		save_erases += (M.erases[0] + M.erases[1]) - before;
+	}
+	CHECK_MSG(save_erases == 0, "saves erased %u times", save_erases);
+	{ store_t r; store_init(&r, ops()); CHECK(store_load(&r, &out) == 0 && same(&out, &d) && r.seq == 600); }
+	/* the spare erase never touches the page with the newest record */
+	int act = s.active_page;
+	uint8_t snap[STORE_PAGE_BYTES];
+	memcpy(snap, M.page[act], sizeof snap);
+	CHECK(store_erase_spare(&s) == 0);
+	CHECK(memcmp(snap, M.page[act], sizeof snap) == 0);
+	/* power cut during a pre-erase: newest record intact, next saves still work */
+	for (int i = 0; i < 8; i++) { d = sample(700 + i); CHECK(store_save(&s, &d) == 0); }
+	M.erase_cut = 1;
+	CHECK(store_erase_spare(&s) != 0);
+	{ store_t r; store_init(&r, ops()); CHECK(store_load(&r, &out) == 0 && same(&out, &d));
+	  CHECK(store_spare_needs_erase(&r) == 1);
+	  store_data_t n2 = sample(999);
+	  CHECK(store_save(&r, &n2) == 0);
+	  store_t r2; store_init(&r2, ops()); CHECK(store_load(&r2, &out) == 0 && same(&out, &n2)); }
 }
 
 static void test_corruption(void)
@@ -273,6 +336,7 @@ int main(void)
 	RUN(test_page_rotation_and_wear);
 	RUN(test_power_loss_during_write);
 	RUN(test_power_loss_during_erase);
+	RUN(test_spare_pre_erase);
 	RUN(test_corruption);
 	RUN(test_write_failure_then_rescan);
 	RUN(test_debounce);
