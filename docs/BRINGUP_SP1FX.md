@@ -1,4 +1,39 @@
-# SP-1 FX v1: integrated firmware bring-up (rc4 current)
+# SP-1 FX v1: integrated firmware bring-up (rc5 current)
+
+## rc5 (2026-11-24) = rc4 + safer jack levels + feedback saturation -- NOT RUN ON HARDWARE
+
+| | |
+|---|---|
+| File | `~/spfx/flash-ready/sp1fx-v1-rc5.bin` (ELF: `sp1fx-v1-rc5.elf`) |
+| SHA-256 | `bfaa973eb2369d935b79d19ca02750296f270988166d5e83c4052dc3954810db` (in `SHA256SUMS`) |
+| Size | 152,584 B at 0x20000, `check_image.py` PASS, two clean builds identical; companion from the same commit |
+
+- **Headphone jack level, three steps** (companion: "Headphone jack level"):
+  | Level | mixer | trim | over Headphones | jack at 0 dBFS, master 100 % (CALCULATED) |
+  |---|---|---|---|---|
+  | Headphones (normal) | -30 dB | -6 dB | 0 dB | ~16 mVrms |
+  | Loud | -15 dB | -6 dB | +15 dB | ~91 mVrms |
+  | Line out (speakers only) | 0 dB | 0 dB | +36 dB | ~1.0 Vrms (+2 dBu) |
+  (From Cirrus' 35 mW / 30 ohm = ~1.02 Vrms full scale; not measured.)
+- **Every power-up starts at Headphones**, whatever was used before.
+- Going louder asks for confirmation in the companion and lowers the master by the
+  difference (15 or 36 dB) so nothing jumps. Going quieter is always allowed and keeps the
+  master.
+- **Plugging something into the jack while at Loud or Line out returns to Headphones** (the
+  refused LED pattern flashes, console `C ... jack plugged`). It uses the codec's tip-sense
+  detection, already read every 250 ms. A speaker cable counts too: plug it in first, then
+  choose Line out.
+- **Delay, chorus and flanger feedback saturate softly** above full scale (linear below,
+  rounding off towards 1.9, under the delay lines' +-2.0 limit) instead of hard clipping with
+  hot input and high feedback. The reverb has no clamp in its loop (it always decays) and tape
+  wobble has no feedback; both unchanged.
+- rc5 test: rc4 steps 1-4. Then: Loud, then Line out with a powered speaker, starting low (VOL+
+  from where it lands); unplug/replug the jack: it must come back at Headphones. Turn delay
+  feedback to max with a loud input: it should get thick and saturated, not crackle.
+
+---
+
+# rc4 (superseded by rc5)
 
 ## rc4 (2026-11-24) -- NOT RUN ON HARDWARE
 

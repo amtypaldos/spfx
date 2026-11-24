@@ -2,7 +2,24 @@
 
 Evidence key: **[HW]** observed on the owner's SP-1 (owner-run; see the hardware log). **[HOST]** verified by automated tests on a development Mac. **[SRC]** from upstream source/docs or our own build output. **[UNTESTED]** built but never run. **[TODO]** not started. The integrated image v1-rc1 has **not** been run on an SP-1.
 
-## v1-rc4 (2026-11-24) -- NOT RUN ON HARDWARE
+## v1-rc5 (2026-11-24) -- NOT RUN ON HARDWARE
+
+`sp1fx-v1-rc5.bin`, SHA-256 `bfaa973eb2369d935b79d19ca02750296f270988166d5e83c4052dc3954810db`,
+152,584 B, check PASS, reproducible, 0 warnings; host suites pass, companion 56/56.
+
+= rc4 plus (owner feedback on line out):
+- Three jack levels: Headphones / Loud (+15 dB) / Line out (+36 dB). SET_OUTPUT_MODE value 2
+  = Loud; 0 and 1 keep their meaning. Levels are CALCULATED, not measured [HOST policy].
+- Every start is at Headphones (`CONFIG_SP1FX_LINEOUT_RESTORE=n`).
+- Going louder lowers the master by the difference (tested for every pair of levels over the
+  whole VOL grid).
+- A jack plug-in at Loud/Line out returns to Headphones [UNTESTED; uses the tip-sense read
+  already polled].
+- Soft feedback saturation (`fx_fbsat`) in delay and chorus/flanger: linear to full scale,
+  smooth knee to 1.9 [HOST: identity below 1, monotonic, bounded; hot input at max feedback
+  never pins the +-2 rail].
+
+## v1-rc4 (2026-11-24) -- superseded by rc5 (not run)
 
 `sp1fx-v1-rc4.bin`, SHA-256 `ae95d5caef17b36613dce3104ee03047a6ac381dcb0b4d5d79fd44511365ffbe`,
 151,504 B, check PASS, reproducible, 0 warnings; host: 12 suites pass, companion 56/56.

@@ -8,7 +8,7 @@ This is an unofficial hobby project. It is not affiliated with, endorsed by, or 
 
 **Development firmware. Only bring-up images have run on the owner's hardware, and nothing here is production-ready.** The evidence labels follow `docs/STATUS.md`.
 
-**Newest image: `sp1fx-v1-rc4.bin`, the integrated firmware (`firmware/app/zephyr_sp1fx`). Built and host-tested, NOT RUN ON HARDWARE yet.** rc1 reset by watchdog every few seconds on hardware; rc2 removes the suspected causes and records where a remaining hang happens (`docs/STATUS.md`). It combines USB audio + effects, buttons/faders/LEDs, VOL+/VOL- volume (2 dB steps, saved), the companion protocol on the USB serial port, settings saved to internal flash (0xFD000-0xFEFFF), and the sync jack (off by default, untested with gear). Owner test plan: `docs/BRINGUP_SP1FX.md`.
+**Newest image: `sp1fx-v1-rc5.bin`, the integrated firmware (`firmware/app/zephyr_sp1fx`). Built and host-tested, NOT RUN ON HARDWARE yet.** rc1 reset by watchdog every few seconds on hardware; rc2 removes the suspected causes and records where a remaining hang happens (`docs/STATUS.md`). It combines USB audio + effects, buttons/faders/LEDs, VOL+/VOL- volume (2 dB steps, saved), the companion protocol on the USB serial port, settings saved to internal flash (0xFD000-0xFEFFF), and the sync jack (off by default, untested with gear). Owner test plan: `docs/BRINGUP_SP1FX.md`.
 
 **Verified on hardware** (owner-observed, spare unit, 2026-11-24; see `docs/STATUS.md`):
 
@@ -148,7 +148,8 @@ Staged images are kept outside the repository, in `~/spfx/flash-ready/`. They ar
 | `sp1fx-v1-rc1.bin` | Integrated firmware rc1. **Resets by watchdog on hardware.** Superseded. |
 | `sp1fx-v1-rc2.bin` | Integrated firmware rc2 (reset fixes + stall recorder). Ran on the owner's unit; FN-hold power off too easy to hit. Superseded. |
 | `sp1fx-v1-rc3.bin` | Integrated firmware rc3: controls fix, 4 s power on/off, charge standby. Ran on the owner's unit; control-loop starvation near-misses under heavy load. Superseded. |
-| `sp1fx-v1-rc4.bin` | **Integrated firmware rc4**: total-load guard + starvation net, stepped event-based saving, diagnostics off by default, headphone-jack Line out mode, rapid preset flash. Not run on hardware yet. Test plan: `docs/BRINGUP_SP1FX.md`. Needs the companion from the same commit. |
+| `sp1fx-v1-rc4.bin` | Integrated firmware rc4. Superseded by rc5 (not run). |
+| `sp1fx-v1-rc5.bin` | **Integrated firmware rc5** = rc4 + three headphone-jack levels (always Headphones at start, back to Headphones on plug-in) + soft feedback saturation. Not run on hardware yet. Test plan: `docs/BRINGUP_SP1FX.md`. Needs the companion from the same commit. |
 | `RECOVERY-tape-looper-from-repo.bin` | Tape Looper release, recovery only. Not built from this repository. |
 
 Bring-up procedures and pass/fail checklists are in `docs/BRINGUP_SP1FX.md` (integrated firmware), `docs/BRINGUP_TONE.md`, `docs/BRINGUP_CONTROLS.md`, `docs/BRINGUP_SYNC.md` and `docs/BRINGUP_USBAUDIO.md`.
