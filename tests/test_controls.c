@@ -207,6 +207,31 @@ static void test_volume_mapping(void)
 	}
 }
 
+static void test_output_mode_levels(void)
+{
+	out_levels_t hp = vol_out_levels(OUT_MODE_HP, 1), ln = vol_out_levels(OUT_MODE_LINE, 1);
+	out_levels_t sp = vol_out_levels(OUT_MODE_LINE, 0), sp2 = vol_out_levels(OUT_MODE_HP, 0);
+	CHECK(hp.mix_att_db == 30 && hp.trim_db == -6);        /* unchanged headphone level */
+	CHECK(ln.mix_att_db == 0 && ln.trim_db == 0);
+	CHECK(sp.trim_db == -6 && sp2.trim_db == -6);           /* the speaker never changes */
+	CHECK(vol_line_extra_db() == 36);
+	/* at the jack: level = master dB + trim - mixer attenuation */
+	for (int k = 0; k <= VOL_STEPS; k++) {
+		float m = (float)k / VOL_STEPS;
+		float m2 = vol_master_for_mode_switch(m, OUT_MODE_HP, OUT_MODE_LINE);
+		float before = m < VOL_MUTE_BELOW ? -200.0f : vol_master_db(m) + hp.trim_db - hp.mix_att_db;
+		float after = m2 < VOL_MUTE_BELOW ? -200.0f : vol_master_db(m2) + ln.trim_db - ln.mix_att_db;
+		CHECK_MSG(after <= before + 1e-3f, "m=%g: %g -> %g dB", m, before, after); /* never louder */
+		if (m >= 0.6f + 1.0f / VOL_STEPS) CHECK_NEAR(after, before, 1e-3);      /* same level when possible */
+	}
+	/* back to headphones keeps master (quieter by 36 dB) */
+	CHECK_NEAR(vol_master_for_mode_switch(0.5f, OUT_MODE_LINE, OUT_MODE_HP), 0.5, 1e-6);
+	CHECK_NEAR(vol_master_for_mode_switch(1.0f, OUT_MODE_LINE, OUT_MODE_LINE), 1.0, 1e-6);
+	/* line out at master 100 %: 0 dB into the codec (limiter keeps |x| <= 1, so no codec clip) */
+	CHECK_NEAR(vol_out_dbfs(1.0f, (float)ln.trim_db), 0.0, 1e-4);
+	CHECK_NEAR(vol_out_dbfs(1.0f, (float)hp.trim_db), -6.0, 1e-4);
+}
+
 static void test_volume_led_bar(void)
 {
 	setup(850);
@@ -730,23 +755,36 @@ static void test_preset_leds_flash_then_position_bar(void)
 	uint32_t t0 = 0;
 	for (int i = 0; i < 20 && !t0; i++) { hold(B(BTN_FN), 8); if (ui.preset_idx == 0) t0 = T; }
 	CHECK(t0 != 0);
-	controller_leds(&ui, T + 10, &f);
-	CHECK(f.play[0] == 255 && f.play[1] == 255 && f.play[2] == 255 && f.play[3] == 255); /* confirm flash */
-	controller_leds(&ui, T + 400, &f);
+	/* rapid flashing: all four together, on/off every 50 ms, 7 flashes in 0.7 s */
+	{
+		const uint32_t start = ui.preset_flash_until - PRESET_FLASH_MS;
+		int flashes = 0, last_on = 0;
+		for (uint32_t t = start; t < ui.preset_flash_until; t += 5) {
+			controller_leds(&ui, t, &f);
+			int on = f.play[0] == 255;
+			CHECK(f.play[1] == f.play[0] && f.play[2] == f.play[0] && f.play[3] == f.play[0]); /* not the refused pairs */
+			if (on && !last_on) flashes++;
+			last_on = on;
+		}
+		CHECK_MSG(flashes == 7, "flashes %d", flashes);
+	}
+	controller_leds(&ui, ui.preset_flash_until + 100, &f);
 	CHECK(f.play[0] == 255 && f.play[1] == 0 && f.play[3] == 0); /* first preset -> 1 LED */
-	controller_leds(&ui, T + 2000, &f);
+	controller_leds(&ui, ui.preset_flash_until + 1300, &f);
+	CHECK(f.play[0] == 255 && f.play[1] == 0);                      /* bar still on ~1.4 s */
+	controller_leds(&ui, ui.preset_bar_until + 100, &f);
 	CHECK(f.play[0] == 0 && f.play[3] == 0); /* back to the level meter (silent) */
 	/* last preset -> 4 LEDs */
 	hold(0, 40);
 	hold(B(BTN_FN), 40); hold(B(BTN_FN) | B(BTN_REV), 24); hold(B(BTN_FN), 8);
 	for (int i = 0; i < 20 && ui.preset_idx != FACTORY_PRESET_COUNT - 1; i++) hold(B(BTN_FN), 8);
 	CHECK(ui.preset_idx == FACTORY_PRESET_COUNT - 1);
-	controller_leds(&ui, T + 400, &f);
+	controller_leds(&ui, ui.preset_flash_until + 100, &f);
 	CHECK(f.play[0] == 255 && f.play[1] == 255 && f.play[2] == 255 && f.play[3] == 255);
 	/* middle presets are monotonic: the bar never shrinks as the index grows */
 	int prev = 0;
 	for (int idx = 0; idx < FACTORY_PRESET_COUNT; idx++) {
-		ui.preset_idx = idx; ui.preset_bar_until = T + 1000; ui.preset_flash_until = 0;
+		ui.preset_idx = idx; ui.preset_bar_until = T + 1000; ui.preset_flash_until = T + 1000 - PRESET_BAR_MS + PRESET_FLASH_MS;
 		controller_leds(&ui, T + 600, &f);
 		int lit = (f.play[0] > 0) + (f.play[1] > 0) + (f.play[2] > 0) + (f.play[3] > 0);
 		CHECK(lit >= prev && lit >= 1 && lit <= 4);
@@ -802,6 +840,7 @@ int main(void)
 	RUN(test_volume_steps_and_repeat);
 	RUN(test_volume_mapping);
 	RUN(test_volume_led_bar);
+	RUN(test_output_mode_levels);
 	RUN(test_edit_mode_and_takeover);
 	RUN(test_takeover_unit);
 	RUN(test_faders_set_wet_after_pickup);

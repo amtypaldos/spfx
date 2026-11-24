@@ -82,8 +82,12 @@ void controller_resync(controller_t *c);
 /* Install the preset list. count 0 disables FN + rocker. */
 void controller_set_presets(controller_t *c, int count, int (*fill)(void *ctx, int idx, store_data_t *out), void *ctx);
 #define PRESET_FADE_MS 25u
-#define PRESET_FLASH_MS 250u
-#define PRESET_BAR_MS 1400u
+/* preset loaded (owner request, rc4): the four PLAY-side LEDs flash rapidly (7 flashes at
+ * 10 Hz, all four together, 50 ms on / 50 ms off) for PRESET_FLASH_MS, then the position bar
+ * for 1.4 s. The refused pattern (alternating pairs, 80 ms) stays distinct. */
+#define PRESET_FLASH_MS 700u
+#define PRESET_FLASH_HALF_MS 50u
+#define PRESET_BAR_MS (PRESET_FLASH_MS + 1400u)
 /* Pop the oldest device-originated event; returns 0 if none. */
 int controller_pop_event(controller_t *c, ctl_event_t *out);
 void controller_leds(const controller_t *c, uint32_t now_ms, led_frame_t *out);

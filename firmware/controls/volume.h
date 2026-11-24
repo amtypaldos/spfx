@@ -28,4 +28,30 @@ float vol_master_db(float m);
 /* Level at the codec input in dBFS for a full-scale signal: vol_master_db(m) + trim_db. */
 float vol_out_dbfs(float m, float trim_db);
 
+/* ---- headphone-jack output mode (rc4) ----
+ * Headphones (default after a fresh start, factory reset, SAFE BOOT): CS42L42 mixer -30 dB and
+ * the -6 dB digital trim, as every image so far. Line out (for a powered speaker / line input):
+ * mixer 0 dB (the level Tape Looper ships with) and no trim: +36 dB. Speaker: unchanged.
+ * CALCULATED, not measured: the CS42L42 product page gives 35 mW into 30 ohm, i.e. about
+ * 1.0 Vrms at full scale, so a 0 dBFS signal at master 100 % gives ~1.0 Vrms (+2 dBu) in line
+ * mode and ~16 mVrms in headphone mode. */
+#define OUT_MODE_HP 0
+#define OUT_MODE_LINE 1
+#define OUT_HP_MIX_ATT_DB 30
+#define OUT_HP_TRIM_DB (-6)
+#define OUT_LINE_MIX_ATT_DB 0
+#define OUT_LINE_TRIM_DB 0
+#define OUT_SPK_TRIM_DB (-6)
+typedef struct {
+	int mix_att_db;  /* CS42L42 mixer attenuation (headphone jack only) */
+	int trim_db;     /* digital trim after the engine limiter */
+} out_levels_t;
+out_levels_t vol_out_levels(int mode, int on_headphone_jack);
+/* dB the jack gets louder going from HP mode to line mode (36) */
+int vol_line_extra_db(void);
+/* Master value to use after a mode switch so the level at the jack never jumps up:
+ * to line -> lower by vol_line_extra_db() (clamped at 0 = mute); to headphones -> unchanged
+ * (it gets quieter by itself). Snapped to the VOL grid. */
+float vol_master_for_mode_switch(float m, int from_mode, int to_mode);
+
 #endif

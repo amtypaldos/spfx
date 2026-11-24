@@ -300,7 +300,8 @@ static void leds_base(const controller_t *c, uint32_t now, led_frame_t *o)
 	 * the list (1..4 LEDs; a position cue, not a number). Takes priority over the level meter. */
 	if (c->preset_idx >= 0 && now < c->preset_bar_until && now >= c->preset_bar_until - PRESET_BAR_MS && now >= c->err_until) {
 		if (now < c->preset_flash_until) {
-			for (int i = 0; i < 4; i++) o->play[i] = 255;
+			const uint32_t ph = (now - (c->preset_flash_until - PRESET_FLASH_MS)) / PRESET_FLASH_HALF_MS;
+			for (int i = 0; i < 4; i++) o->play[i] = (ph & 1u) ? 0 : 255;
 		} else {
 			int lit = c->preset_count > 1 ? 1 + (c->preset_idx * 3) / (c->preset_count - 1) : 1;
 			for (int i = 0; i < 4; i++) o->play[i] = i < lit ? 255 : 0;
