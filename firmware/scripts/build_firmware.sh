@@ -8,6 +8,11 @@
 #   firmware/scripts/build_firmware.sh [build] [DIR] # clean build + check_image.py
 #   firmware/scripts/build_firmware.sh repro        # two clean builds, compare SHA-256
 #
+# Options (before the command):
+#   --app NAME   app under firmware/app/ to build (default: zephyr_min;
+#                also: zephyr_tone). Default output dir: build/firmware/NAME.
+#   --no-usb     add the app's no_usb.conf (zephyr_tone only: USB console off)
+#
 # Toolchain location: $SP1FX_TOOLCHAIN (default: <repo>/../toolchain).
 # See docs/BUILD.md.
 set -euo pipefail
@@ -16,7 +21,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FW="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO="$(cd "$FW/.." && pwd)"
 TC="${SP1FX_TOOLCHAIN:-$(cd "$REPO/.." && pwd)/toolchain}"
-APP="$FW/app/zephyr_min"
+APP_NAME="zephyr_min"
+EXTRA_CONF=""
 LOCK="$FW/west-lock.json"
 WS="$TC/zephyr-ws"
 SDK="$TC/zephyr-sdk-0.17.4"
@@ -105,13 +111,22 @@ env_setup() {
 }
 
 build() {
-  local out="${1:-$REPO/build/firmware/zephyr_min}"
+  local out="${1:-$REPO/build/firmware/$APP_NAME}"
+  local app="$FW/app/$APP_NAME"
+  [ -f "$app/CMakeLists.txt" ] || die "no such app: $app"
+  local extra=()
+  if [ -n "$EXTRA_CONF" ]; then
+    [ -f "$app/$EXTRA_CONF" ] || die "$APP_NAME has no $EXTRA_CONF"
+    extra=(-DEXTRA_CONF_FILE="$EXTRA_CONF")
+  fi
   verify_pins
   env_setup
   case "$out" in /*) ;; *) out="$PWD/$out" ;; esac
   rm -rf "$out"          # always a clean build directory
-  cmake -GNinja -S "$APP" -B "$out" \
+  echo "app: $APP_NAME${EXTRA_CONF:+ (+$EXTRA_CONF)}"
+  cmake -GNinja -S "$app" -B "$out" \
     -DBOARD=stem_player \
+    ${extra[@]+"${extra[@]}"} \
     -DBOARD_ROOT="$FW" \
     -DBUILD_VERSION="$(lock_get "d['build_defines']['BUILD_VERSION']")" \
     > "$out.configure.log" 2>&1 || { tail -40 "$out.configure.log"; die "configure failed"; }
@@ -126,7 +141,7 @@ build() {
 }
 
 repro() {
-  local a="$REPO/build/firmware/repro_a" b="$REPO/build/firmware/repro_b"
+  local a="$REPO/build/firmware/repro_${APP_NAME}_a" b="$REPO/build/firmware/repro_${APP_NAME}_b"
   build "$a" > /dev/null
   build "$b" > /dev/null
   local ha hb
@@ -137,11 +152,21 @@ repro() {
   if [ "$ha" = "$hb" ]; then echo "REPRODUCIBLE: .bin identical"; else die "NOT reproducible"; fi
 }
 
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --app) [ $# -ge 2 ] || die "--app needs a name"; APP_NAME="$2"; shift 2 ;;
+    --app=*) APP_NAME="${1#--app=}"; shift ;;
+    --no-usb) EXTRA_CONF="no_usb.conf"; shift ;;
+    *) break ;;
+  esac
+done
+case "$APP_NAME" in */*|.*|"") die "bad app name: $APP_NAME" ;; esac
+
 cmd="${1:-build}"
 case "$cmd" in
   setup) setup ;;
   build) shift || true; build "${1:-}" ;;
   repro) repro ;;
   verify) verify_pins ;;
-  *) die "usage: $0 [setup|build [DIR]|repro|verify]" ;;
+  *) die "usage: $0 [--app NAME] [--no-usb] [setup|build [DIR]|repro|verify]" ;;
 esac

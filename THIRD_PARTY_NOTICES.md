@@ -4,7 +4,14 @@
 
 | Path | Source | Commit | License | Notes |
 |---|---|---|---|---|
+| `firmware/app/zephyr_tone/src/sp1_codecs.c` (adapted; licence + copyright header kept in the file) | chattock/sp1-tape-looper `tools/capacity422/runtime/src/main.c`: `tas_wr()`/`tas_page()`/`tas_set_speaker()`, `tas2505_configure()`, `tpw()`/`tpr()`, `hp_detect_connected()`, `HP_TIM_TEST` branch of `hp_codec_init()` | `0359372e11f61d74a85e2e4449178a5c62010664` | MIT, Copyright (c) 2026 chattock (`firmware/boards/LICENSES/Tape-Looper-MIT.txt`). The CS42L42 sequence in it is Tim Knapen's SP-1-dev wiki `I2C.md` (MIT, Copyright (c) 2026 Tim Knapen, `firmware/boards/LICENSES/Tim-Knapen-SP1-dev-MIT.txt`) | Register addresses/values kept; changed for hearing safety and pops: both outputs configured muted and unmuted only by the app, CS42L42 mixer -30 dB (was 0 dB), TAS2505 class-D gain +6 dB (was +18 dB), speaker attenuation -6 dB (was 0 dB), DAC muted before power-up, new mute/unmute helpers; restructured into functions without Tape Looper globals |
 | `firmware/boards/teenageengineering/stem_player/*` (8 files, unmodified) | chattock/sp1-tape-looper `boards/teenageengineering/stem_player` | `0359372e11f61d74a85e2e4449178a5c62010664` | MIT, Copyright (c) 2026 chattock (`firmware/boards/LICENSES/Tape-Looper-MIT.txt`). Kconfig/defconfig/yaml files carry `SPDX-License-Identifier: Apache-2.0` headers, kept as-is (`firmware/boards/LICENSES/Apache-2.0.txt`). | dts header: reconstructed from ericlewis/sp1-midi's board (MIT, licence text not reviewed/copied yet) and timknapen/SP-1-dev pin map + wiki (MIT, Copyright (c) 2026 Tim Knapen, `firmware/boards/LICENSES/Tim-Knapen-SP1-dev-MIT.txt`) |
+
+`firmware/app/zephyr_tone/src/main.c` is new code; its I2S configuration (clock-slave, 16-bit, I2S format, prime-then-START,
+drop/re-prime failsafe), its init order (I2S, TAS2505, CS42L42) and its prj.conf USB device_next/CDC ACM settings follow Tape Looper's
+`audio_thread()`/`audio_init()`/`usb_audio_start()` and `prj.conf` (same commit, MIT); the track-LED pin table (P0.29, P0.26, P1.15, P1.14)
+comes from Tape Looper's `track_leds[]`. It links Zephyr's `samples/subsys/usb/common/sample_usbd_init.c` (Apache-2.0, part of the pinned
+Zephyr checkout, not copied). Nothing from softmodded/marisko or jackiscool123123121/marisko was used.
 
 `firmware/app/zephyr_min/src/main.c` is new code; its watchdog-feed and SYSTEM_OFF sequence follow
 the approach in sp1-tape-looper `tools/capacity422/runtime/src/main.c` (MIT) but no code was copied.

@@ -58,3 +58,5 @@ Evidence key: **[HOST]** verified by automated tests on a development Mac. **[SR
 
 ## Hardware log (owner-reported; no automated evidence)
 - 2026-11-24: `sp1fx-min-heartbeat.bin` (SHA-256 18afab48...592667) flashed with Solderless to the spare unit; LED 1 blinks. This confirms: bootloader accepts an app linked at 0x20000, our reset/vector layout is valid, LED pin P0.29 is right.
+- 2026-11-24: `sp1fx-tone.bin` (SHA-256 87886d14...433f9): owner reports left channel low tone, right channel high tone, "sounds great". This confirms (owner-observed) the CS42L42/TAS2505 init, I2S slave clocking from the 3.072 MHz oscillator, and channel order. Not yet reported: which output was heard (speaker vs headphones), LEDs 2-4, serial status line, speaker mute on headphone insert, pop-free switching.
+- Finding from the tone build: `nfct-pins-as-gpios` in the board dts has no effect in Zephyr 4.3.1 (it is only read from `&uicr`). Making it effective would write UICR.NFCPINS (outside our image) and reset the chip: do not change without an explicit decision. P0.09 (TAS2505 reset) works as a GPIO because this unit's UICR already allows it.

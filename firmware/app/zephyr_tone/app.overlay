@@ -1,0 +1,31 @@
+/*
+ * SP-1 FX tone bring-up overlay on the stem_player board (firmware/boards).
+ *
+ * Enabled: i2c0 (CS42L42 0x48, TAS2505 0x18), i2s0 (slave: SCK P0.12 and
+ * LRCK P0.11 are inputs, SDOUT P1.09; pinctrl in the board), usbd with the
+ * board's cdc_acm_uart0 (status console).
+ * Disabled: the board's UAC2 speaker function (not built) and SAADC
+ * (bootloader-owned, unused here).
+ *
+ * Pins (sources: chattock/sp1-tape-looper tools/capacity422/runtime/src/main.c
+ * @0359372e, MIT; timknapen/SP-1-dev wiki I2C.md / I2S.md, MIT):
+ *   track LEDs 1..4 = P0.29, P0.26, P1.15, P1.14, active-high
+ *   FUNCTION        = P0.27, active-low with internal pull-up
+ *   OSC_EN          = P0.13 (3.072 MHz oscillator -> I2S SCK), active-high
+ *   CS42L42 RESET   = P0.15, active-low
+ *   TAS2505 RESET   = P0.09 (NFC1 pad), active-low
+ */
+
+&zephyr_user {
+	heartbeat-led-gpios = <&gpio0 29 GPIO_ACTIVE_HIGH>;   /* LED 1 */
+	cs42-led-gpios      = <&gpio0 26 GPIO_ACTIVE_HIGH>;   /* LED 2 */
+	tas-led-gpios       = <&gpio1 15 GPIO_ACTIVE_HIGH>;   /* LED 3 */
+	i2s-led-gpios       = <&gpio1 14 GPIO_ACTIVE_HIGH>;   /* LED 4 */
+	fn-gpios            = <&gpio0 27 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+	osc-en-gpios        = <&gpio0 13 GPIO_ACTIVE_HIGH>;
+	cs42-rst-gpios      = <&gpio0 15 GPIO_ACTIVE_LOW>;
+	tas-rst-gpios       = <&gpio0 9 GPIO_ACTIVE_LOW>;
+};
+
+&uac2_speaker { status = "disabled"; };
+&adc  { status = "disabled"; };

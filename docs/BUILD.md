@@ -79,7 +79,15 @@ firmware/scripts/build_firmware.sh setup    # venv + pinned west workspace + SDK
 firmware/scripts/build_firmware.sh          # clean build -> build/firmware/zephyr_min + check_image.py
 firmware/scripts/build_firmware.sh repro    # two clean builds in different dirs, compares SHA-256
 firmware/scripts/build_firmware.sh verify   # only checks commit pins and SDK version
+
+# other apps (default is zephyr_min); options go before the command
+firmware/scripts/build_firmware.sh --app zephyr_tone           # -> build/firmware/zephyr_tone
+firmware/scripts/build_firmware.sh --app zephyr_tone repro     # -> build/firmware/repro_zephyr_tone_{a,b}
+firmware/scripts/build_firmware.sh --app zephyr_tone --no-usb  # adds the app's no_usb.conf
 ```
+
+`zephyr_tone` (audio bring-up, quiet test tone) is described in `docs/BRINGUP_TONE.md`.
+`repro` directories are now named `repro_<app>_{a,b}`.
 
 Equivalent manual build:
 
