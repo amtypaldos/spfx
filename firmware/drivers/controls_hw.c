@@ -28,6 +28,11 @@
 
 #define ZU DT_PATH(zephyr_user)
 
+/* zephyr_sp1fx disables the devicetree adc node and scans the SAADC itself
+ * (drivers/saadc_scan.c); then the Zephyr-ADC parts below are left out. */
+#define CHW_ADC DT_NODE_HAS_STATUS(DT_NODELABEL(adc), okay)
+
+#if CHW_ADC
 static const struct adc_dt_spec adc_ch[6] = {
 	ADC_DT_SPEC_GET_BY_IDX(ZU, 0), /* AIN0 P0.02: ladder 1, T1..T4 + PLAY */
 	ADC_DT_SPEC_GET_BY_IDX(ZU, 1), /* AIN1 P0.03: ladder 2, VOL+/- + FWD/REV */
@@ -36,6 +41,7 @@ static const struct adc_dt_spec adc_ch[6] = {
 	ADC_DT_SPEC_GET_BY_IDX(ZU, 4), /* AIN2 P0.04: fader 3 */
 	ADC_DT_SPEC_GET_BY_IDX(ZU, 5), /* AIN7 P0.31: fader 4 */
 };
+#endif
 static const struct gpio_dt_spec fn = GPIO_DT_SPEC_GET(ZU, fn_gpios);
 static const struct gpio_dt_spec btn_com = GPIO_DT_SPEC_GET(ZU, btn_com_gpios);
 
@@ -70,7 +76,7 @@ static uint16_t track_seq[4] __aligned(4); /* EasyDMA: must live in RAM */
 static uint16_t play_seq[4] __aligned(4);
 static uint32_t released_pwms;
 static int adc_status = 1;
-static int16_t scan_buf[6];
+static __maybe_unused int16_t scan_buf[6];
 
 static void pwm_stop(NRF_PWM_Type *p)
 {
@@ -166,6 +172,7 @@ int controls_hw_init(void)
 	led_pwm_start(LED_PWM_TRACK, track_pins, track_seq);
 	led_pwm_start(LED_PWM_PLAY, play_pins, play_seq);
 
+#if CHW_ADC
 	adc_status = 0;
 	for (int i = 0; i < 6; i++) {
 		if (!adc_is_ready_dt(&adc_ch[i])) {
@@ -182,9 +189,14 @@ int controls_hw_init(void)
 			break;
 		}
 	}
+#else
+	adc_status = 1;   /* not used: the app scans the SAADC itself */
+#endif
 	k_msleep(RAIL_SETTLE_MS);
-	return adc_status;
+	return CHW_ADC ? adc_status : 0;
 }
+
+#if CHW_ADC
 
 static int scan_once(void)
 {
@@ -336,6 +348,8 @@ int controls_hw_adc_stuck(void)
 	return nb_stuck ? 1 : 0;
 }
 #endif
+
+#endif /* CHW_ADC */
 
 bool controls_hw_fn_pressed(void)
 {

@@ -58,6 +58,14 @@ void crashdump_set_crumbs(const volatile uint32_t *words);
 uint32_t crashdump_early_crashes(void);
 void crashdump_mark_stable(void);
 
+/* Retained "powered off while USB was plugged in" flag: the app sets it and soft-resets into
+ * its charge standby (System OFF with VBUS already present would have no wake edge). Taking
+ * it clears it. */
+void crashdump_set_poweroff_flag(void);
+int crashdump_take_poweroff_flag(void);
+/* 1 if crashdump_init found a valid crash record from the previous run */
+int crashdump_pending(void);
+
 /* Stall snapshots (zephyr_sp1fx): a supervisor (k_timer, interrupt context) that sees the
  * control thread stop making progress formats up to CRASHDUMP_STALL_SLOTS one-line
  * descriptions (control-loop stage, its state/PC/backtrace, per-thread CPU shares, USB/CDC

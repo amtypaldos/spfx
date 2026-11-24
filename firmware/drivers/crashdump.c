@@ -39,7 +39,10 @@ static __attribute__((section(".noinit.sp1fx_crashdump"))) struct {
 	uint32_t boot_magic, boots, boot_check;
 	struct stall_rec stall[CRASHDUMP_STALL_SLOTS];
 	uint32_t early, early_check, last_count;
+	uint32_t poweroff_flag;
 } ret;
+
+#define POWEROFF_MAGIC 0x504f4646u /* "POFF" */
 
 static const volatile uint32_t *crumbs;
 
@@ -294,6 +297,25 @@ void crashdump_stall_clear(void)
 const char *crashdump_stall_prev(int slot)
 {
 	return (slot >= 0 && slot < CRASHDUMP_STALL_SLOTS) ? stall_prev[slot] : "";
+}
+
+void crashdump_set_poweroff_flag(void)
+{
+	ret.poweroff_flag = POWEROFF_MAGIC;
+	__DSB();
+}
+
+int crashdump_take_poweroff_flag(void)
+{
+	const int f = ret.poweroff_flag == POWEROFF_MAGIC;
+
+	ret.poweroff_flag = 0u;
+	return f;
+}
+
+int crashdump_pending(void)
+{
+	return pending ? 1 : 0;
 }
 
 uint32_t crashdump_early_crashes(void)
