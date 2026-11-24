@@ -17,7 +17,7 @@ export class ProtocolError extends Error {
 export const T = Object.freeze({
   HELLO: 0x01, GET_FX: 0x02, GET_STATE: 0x03,
   SET_SLOT_FX: 0x10, SET_PARAM: 0x11, SET_WET: 0x12, SET_BYPASS: 0x13, SET_GLOBAL_BYPASS: 0x14,
-  SET_MASTER: 0x15, SET_INPUT_GAIN: 0x16, SET_ORDER: 0x17, SET_BPM: 0x18, SET_SYNC: 0x19,
+  SET_MASTER: 0x15, SET_INPUT_GAIN: 0x16, SET_ORDER: 0x17, SET_BPM: 0x18, SET_SYNC: 0x19, SET_OUTPUT_MODE: 0x1A,
   SAVE_NOW: 0x20, FACTORY_RESET: 0x21, SUBSCRIBE: 0x30,
   HELLO_RSP: 0x81, FX_DESC: 0x82, STATE: 0x83, RESULT: 0x90,
   EVENT: 0xA0, ADMISSION_ERROR: 0xA1, METERS: 0xA2, PRESET_LOADED: 0xA3,
@@ -25,7 +25,7 @@ export const T = Object.freeze({
 export const TYPE_NAMES = Object.freeze(Object.fromEntries(Object.entries(T).map(([k, v]) => [v, k])));
 export const SETTER_TYPES = Object.freeze([
   T.SET_SLOT_FX, T.SET_PARAM, T.SET_WET, T.SET_BYPASS, T.SET_GLOBAL_BYPASS,
-  T.SET_MASTER, T.SET_INPUT_GAIN, T.SET_ORDER, T.SET_BPM, T.SET_SYNC,
+  T.SET_MASTER, T.SET_INPUT_GAIN, T.SET_ORDER, T.SET_BPM, T.SET_SYNC, T.SET_OUTPUT_MODE,
 ]);
 export const RESULT = Object.freeze({ OK: 0, BAD_ARG: 1, NO_MEMORY: 2, NO_CPU: 3, BUSY: 4, STORAGE: 5 });
 export const FACTORY_RESET_CONFIRM = 0xA5;
@@ -146,6 +146,7 @@ class Reader {
   constructor(b) { this.b = b; this.dv = new DataView(b.buffer, b.byteOffset, b.byteLength); this.p = 0; }
   need(n) { if (this.p + n > this.b.length) throw new ProtocolError('payload too short'); }
   u8() { this.need(1); return this.b[this.p++]; }
+  more() { return this.p < this.b.length; }
   u16() { this.need(2); const v = this.dv.getUint16(this.p, true); this.p += 2; return v; }
   i16() { this.need(2); const v = this.dv.getInt16(this.p, true); this.p += 2; return v; }
   u32() { this.need(4); const v = this.dv.getUint32(this.p, true); this.p += 4; return v; }
@@ -185,6 +186,7 @@ export function encodePayload(msg) {
     }
     case T.SET_BPM: w.u16(checkRange('bpm10', msg.bpm10, 300, 3000)); break;
     case T.SET_SYNC: w.u8(msg.on ? 1 : 0); break;
+    case T.SET_OUTPUT_MODE: w.u8(msg.mode === 1 ? 1 : 0); break;
     case T.FACTORY_RESET: w.u8(msg.confirm ?? FACTORY_RESET_CONFIRM); break;
     case T.SUBSCRIBE: w.u8(checkRange('hz', msg.hz, 0, 20)); break;
 
@@ -239,6 +241,7 @@ export function decodePayload(type, payload) {
     }
     case T.SET_BPM: m = { type, bpm10: checkRange('bpm10', r.u16(), 300, 3000) }; break;
     case T.SET_SYNC: { const v = r.u8(); if (v > 1) throw new ProtocolError('sync must be 0 or 1'); m = { type, on: v === 1 }; break; }
+    case T.SET_OUTPUT_MODE: { const v = r.u8(); if (v > 1) throw new ProtocolError('output mode must be 0 or 1'); m = { type, mode: v }; break; }
     case T.FACTORY_RESET: m = { type, confirm: r.u8() }; break;
     case T.SUBSCRIBE: m = { type, hz: checkRange('hz', r.u8(), 0, 20) }; break;
 
@@ -290,7 +293,7 @@ function isPermutation(o) {
 }
 
 // STATE: fx_id[4] bypass[4] order[4] global u8, reserved u8, fx_count u8, in_gain_cdB i16, master u16n,
-// bpm10 u16, wet[4] u16n, params[4][fx_count][4] u16n, ui_mode u8, edit_slot u8
+// bpm10 u16, wet[4] u16n, params[4][fx_count][4] u16n, ui_mode u8, edit_slot u8, out_mode u8 (v1-rc4+)
 function encodeState(w, s) {
   const fxCount = s.fxCount;
   for (let i = 0; i < 4; i++) w.u8(s.fxId[i]);
@@ -299,7 +302,7 @@ function encodeState(w, s) {
   w.u8(s.globalBypass ? 1 : 0).u8(s.syncOn ? 1 : 0).u8(fxCount).i16(s.inGainCdB).u16(n2u16(s.master)).u16(s.bpm10);
   for (let i = 0; i < 4; i++) w.u16(n2u16(s.wet[i]));
   for (let sl = 0; sl < 4; sl++) for (let f = 0; f < fxCount; f++) for (let p = 0; p < 4; p++) w.u16(n2u16(s.params[sl][f][p]));
-  w.u8(s.uiMode).u8(s.editSlot);
+  w.u8(s.uiMode).u8(s.editSlot).u8(s.outMode === 1 ? 1 : 0);
 }
 function decodeState(r) {
   const fxId = [r.u8(), r.u8(), r.u8(), r.u8()];
@@ -318,7 +321,9 @@ function decodeState(r) {
     params.push(per);
   }
   const uiMode = r.u8(), editSlot = r.u8();
-  return { type: T.STATE, fxId, bypass, order, globalBypass, syncOn, fxCount, inGainCdB, master, bpm10, wet, params, uiMode, editSlot };
+  const outMode = r.more() ? r.u8() : 0;   // firmware v1-rc4+: headphone-jack mode (older: absent = headphones)
+  if (outMode > 1) throw new ProtocolError('state: bad output mode');
+  return { type: T.STATE, fxId, bypass, order, globalBypass, syncOn, fxCount, inGainCdB, master, bpm10, wet, params, uiMode, editSlot, outMode };
 }
 
 /** Build a ready-to-send frame for a message object. */

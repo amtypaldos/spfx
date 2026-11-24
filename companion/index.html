@@ -55,6 +55,8 @@
             <label class="field">BPM<input id="bpm" type="number" min="30" max="300" step="0.1" value="120" inputmode="decimal"></label>
             <button id="gSync" class="toggle" type="button" aria-pressed="false" aria-describedby="syncHelp"><span class="sw" aria-hidden="true"></span><span>Sync clock</span></button>
             <p class="hint" id="syncHelp">Sends MIDI clock (ring) and Pocket Operator pulses (tip) from the SP-1's sync jack at the BPM above. The on/off state is remembered by the device.</p>
+            <button id="gLine" class="toggle" type="button" aria-pressed="false" aria-describedby="lineHelp"><span class="sw" aria-hidden="true"></span><span>Line out (headphone jack)</span></button>
+            <p class="hint" id="lineHelp"><strong>Line out is loud on headphones.</strong> For a powered speaker or mixer input only: about 36 dB louder than the headphone setting (calculated, not measured). Switching to line out first lowers the volume so nothing jumps; raise it slowly with VOL+. The device remembers the setting.</p>
           </div>
         </div>
 

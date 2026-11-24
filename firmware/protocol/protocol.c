@@ -163,6 +163,7 @@ void proto_init(proto_t *p, const proto_config_t *cfg)
 	if (!p->c.block) p->c.block = FX_MAX_BLOCK;
 	p->bpm = (cfg->bpm >= 30.0f && cfg->bpm <= 300.0f) ? cfg->bpm : 120.0f;
 	p->sync_on = cfg->sync_on ? 1 : 0;
+	p->out_mode = cfg->out_mode == 1 ? 1 : 0;
 	if (p->c.sync) {
 		sync_out_set_bpm(p->c.sync, p->bpm);
 		if (p->sync_on) sync_out_start(p->c.sync); /* resume the clock saved before power-off */
@@ -171,9 +172,10 @@ void proto_init(proto_t *p, const proto_config_t *cfg)
 
 /* ------------------------------------------------------------ requests */
 
-static void host_changed(proto_t *p)
+static void host_changed(proto_t *p, uint8_t type)
 {
 	p->dirty = 1;
+	if (p->c.on_host_change) p->c.on_host_change(p->c.ctx, type);
 	if (p->c.deb) store_debounce_mark(p->c.deb, p->now_ms);
 	if (p->c.ctl) controller_resync(p->c.ctl);
 }
@@ -220,11 +222,12 @@ static size_t build_state(proto_t *p, uint8_t *out, size_t cap)
 	d.cfg = p->c.eng->cfg;
 	d.bpm = p->bpm;
 	d.sync_on = p->sync_on;
-	uint16_t n = store_encode(&d, out, (uint16_t)(cap - 2));
+	uint16_t n = store_encode(&d, out, (uint16_t)(cap - 3));
 	if (n == 0) return 0;
 	out[n] = p->c.ctl ? (uint8_t)p->c.ctl->mode : 0;
 	out[n + 1] = p->c.ctl ? (uint8_t)p->c.ctl->edit_slot : 0;
-	return (size_t)n + 2;
+	out[n + 2] = p->out_mode;   /* rc4: headphone-jack output mode */
+	return (size_t)n + 3;
 }
 
 static uint8_t map_status(engine_status s)
@@ -329,6 +332,11 @@ static void handle(proto_t *p, const proto_frame_t *f)
 		p->sync_on = a[0];
 		if (p->c.sync) { if (p->sync_on) sync_out_start(p->c.sync); else sync_out_stop(p->c.sync); }
 		break;
+	case PT_SET_OUTPUT_MODE:
+		NEED(1);
+		if (a[0] > 1) { code = PR_BAD_ARG; break; }
+		p->out_mode = a[0];
+		break;
 	case PT_SAVE_NOW:
 		NEED(0);
 		if (!p->c.save) {
@@ -347,11 +355,12 @@ static void handle(proto_t *p, const proto_frame_t *f)
 		int rej = engine_apply_config(e, &d.cfg);
 		p->bpm = d.bpm;
 		p->sync_on = d.sync_on;
+		p->out_mode = 0; /* factory reset: headphones */
 		if (p->c.sync) { sync_out_set_bpm(p->c.sync, p->bpm); if (p->sync_on) sync_out_start(p->c.sync); else sync_out_stop(p->c.sync); }
 		memset(p->ev_wet, 0, sizeof p->ev_wet);
 		memset(p->ev_param, 0, sizeof p->ev_param);
 		code = rej ? PR_NO_MEMORY : PR_OK;
-		host_changed(p);
+		host_changed(p, f->type);
 		send_result(p, f->seq, f->type, code);
 		return;
 	}
@@ -371,7 +380,7 @@ static void handle(proto_t *p, const proto_frame_t *f)
 		return;
 	}
 #undef NEED
-	if (code == PR_OK) host_changed(p);
+	if (code == PR_OK) host_changed(p, f->type);
 	send_result(p, f->seq, f->type, code);
 }
 

@@ -37,7 +37,7 @@ export class MockDevice {
     const initial = ['saturation', 'filter', 'delay', 'reverb'];
     const idOf = (name) => Math.max(0, fx.findIndex((f) => f.name.toLowerCase().replace(/ /g, '_') === name));
     this.s = {
-      fxId: initial.map(idOf), bypass: [true, true, true, true], order: [0, 1, 2, 3], globalBypass: false, syncOn: false,
+      fxId: initial.map(idOf), bypass: [true, true, true, true], order: [0, 1, 2, 3], globalBypass: false, syncOn: false, outMode: 0,
       inGainCdB: 0, master: 0.75, bpm10: 1200, wet: [1, 1, 1, 1],
       params: Array.from({ length: 4 }, () => fx.map((f) => [0, 1, 2, 3].map((i) => (f.params[i] ? defaultNorm(f.params[i]) : 0)))),
       uiMode: 0, editSlot: 0,
@@ -83,6 +83,7 @@ export class MockDevice {
       case T.SET_ORDER: s.order = g.order.slice(); return RESULT.OK;
       case T.SET_BPM: s.bpm10 = g.bpm10; return RESULT.OK;
       case T.SET_SYNC: s.syncOn = g.on; return RESULT.OK;
+      case T.SET_OUTPUT_MODE: s.outMode = g.mode; return RESULT.OK;
       default: return RESULT.BAD_ARG;
     }
   }

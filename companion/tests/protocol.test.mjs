@@ -191,7 +191,7 @@ test('STATE round trip (exact layout size)', () => {
   const s = sampleState();
   const p = encodePayload(s);
   const n = fxTable.length;
-  assert.equal(p.length, 4 + 4 + 4 + 1 + 1 + 1 + 2 + 2 + 2 + 8 + 4 * n * 4 * 2 + 2);
+  assert.equal(p.length, 4 + 4 + 4 + 1 + 1 + 1 + 2 + 2 + 2 + 8 + 4 * n * 4 * 2 + 2 + 1); // + out_mode (rc4)
   const d = decodePayload(T.STATE, p);
   for (const k of ['fxId', 'bypass', 'order', 'globalBypass', 'fxCount', 'inGainCdB', 'bpm10', 'uiMode', 'editSlot']) assert.deepEqual(d[k], s[k], k);
   assert.ok(near(d.master, s.master));
@@ -208,6 +208,24 @@ test('STATE rejects bad order / truncated', () => {
   const p = encodePayload(s); p[8] = 0; p[9] = 0;
   assert.throws(() => decodePayload(T.STATE, p), ProtocolError);
   assert.throws(() => decodePayload(T.STATE, encodePayload(s).subarray(0, 100)), ProtocolError);
+});
+
+test('SET_OUTPUT_MODE and STATE out_mode (firmware v1-rc4), old STATE without it', () => {
+  for (const mode of [0, 1]) {
+    const m = { type: T.SET_OUTPUT_MODE, mode };
+    assert.deepEqual(decodePayload(T.SET_OUTPUT_MODE, encodePayload(m)), m);
+  }
+  assert.throws(() => decodePayload(T.SET_OUTPUT_MODE, Uint8Array.from([2])));
+  const st = { type: T.STATE, fxId: [1, 2, 3, 4], bypass: [true, false, true, false], order: [0, 1, 2, 3], globalBypass: false,
+    syncOn: false, fxCount: 2, inGainCdB: 0, master: 0.75, bpm10: 1200, wet: [0.5, 0.5, 0.5, 0.5],
+    params: Array.from({ length: 4 }, () => [[0, 0, 0, 0], [0, 0, 0, 0]]), uiMode: 0, editSlot: 0, outMode: 1 };
+  const enc = encodePayload(st);
+  assert.equal(decodePayload(T.STATE, enc).outMode, 1);
+  // firmware before rc4: no out_mode byte -> headphones
+  assert.equal(decodePayload(T.STATE, enc.subarray(0, enc.length - 1)).outMode, 0);
+  // a bad value is rejected
+  const bad = Uint8Array.from(enc); bad[bad.length - 1] = 7;
+  assert.throws(() => decodePayload(T.STATE, bad));
 });
 
 test('RESULT, EVENT, ADMISSION_ERROR, METERS round trip', () => {

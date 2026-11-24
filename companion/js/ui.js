@@ -90,6 +90,11 @@ export function mountUI({ store, ctl, library, env }) {
   bind($('gain'), () => ctl.setInputGainDb(Number($('gain').value) / 10));
   $('gBypass').addEventListener('click', () => ctl.setGlobalBypass(!store.model.globalBypass));
   $('gSync').addEventListener('click', () => ctl.setSync(!store.model.syncOn));
+  $('gLine').addEventListener('click', () => {
+    const toLine = store.model.outMode !== 1;
+    if (toLine && !window.confirm('Line out is LOUD on headphones (about 36 dB above the headphone setting). Use it only with a powered speaker or a line input. Take headphones off first. Switch to line out?')) return;
+    ctl.setOutputMode(toLine ? 1 : 0);
+  });
   $('bpm').addEventListener('change', () => {
     const v = Number($('bpm').value);
     if (Number.isFinite(v) && $('bpm').value !== '') ctl.setBpm(v); else renderGlobal(store.model);
@@ -212,6 +217,7 @@ export function mountUI({ store, ctl, library, env }) {
   function renderGlobal(m) {
     $('gBypass').setAttribute('aria-pressed', String(m.globalBypass));
     $('gSync').setAttribute('aria-pressed', String(m.syncOn));
+    $('gLine').setAttribute('aria-pressed', String(m.outMode === 1));
     setRange($('master'), m.master); $('masterVal').textContent = `${Math.round(m.master * 100)} %`;
     $('master').setAttribute('aria-valuetext', $('masterVal').textContent);
     const g = $('gain');

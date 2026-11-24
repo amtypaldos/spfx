@@ -12,7 +12,7 @@ export function createModel() {
     synced: false,                 // true once a STATE has been received
     slots: Array.from({ length: SLOT_COUNT }, () => ({ fx: 0, bypass: false, wet: 1, params: [] })),
     order: [0, 1, 2, 3],
-    globalBypass: false, syncOn: false, inGainDb: 0, master: 0.75, bpm: 120,
+    globalBypass: false, syncOn: false, outMode: 0, inGainDb: 0, master: 0.75, bpm: 120,
     uiMode: 0, editSlot: 0,
     meters: { inPeak: 0, outPeak: 0, cpuPct: 0, cpuPeakPct: 0, memUsed: 0, inClips: 0, outClips: 0, underruns: 0, overruns: 0, nanEvents: 0 },
   };
@@ -30,6 +30,7 @@ export function applyState(m, s) {
   m.order = s.order.slice();
   m.globalBypass = s.globalBypass;
   m.syncOn = !!s.syncOn;
+  m.outMode = s.outMode === 1 ? 1 : 0;
   m.inGainDb = s.inGainCdB / 100;
   m.master = s.master;
   m.bpm = s.bpm10 / 10;
@@ -53,6 +54,7 @@ export function applySetter(m, g) {
     case T.SET_ORDER: m.order = g.order.slice(); break;
     case T.SET_BPM: m.bpm = g.bpm10 / 10; break;
     case T.SET_SYNC: m.syncOn = g.on; break;
+    case T.SET_OUTPUT_MODE: m.outMode = g.mode; break;
     default: return false;
   }
   return true;

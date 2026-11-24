@@ -477,7 +477,7 @@ static void test_fx_desc_all(void)
 static void check_state_payload(const frm_t *r)
 {
 	const uint8_t *p = r->pay;
-	CHECK(r->len == G_STATE_PAYLOAD_LEN && r->len == 383);
+	CHECK(r->len == G_STATE_PAYLOAD_LEN && r->len == 384); /* 383 + out_mode (rc4) */
 	for (int s = 0; s < 4; s++) {
 		CHECK(p[s] == g_state_fx[s]);
 		CHECK(p[4 + s] == g_state_bypass[s]);
@@ -796,6 +796,37 @@ static void test_subscribe_timing(void)
 
 static uint8_t test_power_flags(void *ctx) { (void)ctx; return 0xFF; } /* only bits 1-2 may pass */
 
+static uint8_t hc_types[16];
+static int hc_n;
+static void hc_cb(void *ctx, uint8_t t) { (void)ctx; if (hc_n < 16) hc_types[hc_n++] = t; }
+
+static void test_output_mode(void)
+{
+	setup();
+	pr.c.on_host_change = hc_cb;
+	hc_n = 0;
+	CHECK(pr.out_mode == 0);
+	uint8_t v = 1;
+	clear_tx();
+	request(PT_SET_OUTPUT_MODE, 21, &v, 1);
+	CHECK(result_code(PT_SET_OUTPUT_MODE, 21) == PR_OK && pr.out_mode == 1 && pr.dirty);
+	CHECK(hc_n == 1 && hc_types[0] == PT_SET_OUTPUT_MODE);
+	clear_tx();
+	request(PT_GET_STATE, 22, NULL, 0);
+	const frm_t *r = last_of(PT_STATE);
+	CHECK(r && r->len == 384 && r->pay[383] == 1);
+	v = 2;
+	clear_tx();
+	request(PT_SET_OUTPUT_MODE, 23, &v, 1);
+	CHECK(result_code(PT_SET_OUTPUT_MODE, 23) == PR_BAD_ARG && pr.out_mode == 1);
+	/* factory reset returns to headphones */
+	uint8_t c = PROTO_FACTORY_RESET_CONFIRM;
+	request(PT_FACTORY_RESET, 24, &c, 1);
+	CHECK(pr.out_mode == 0);
+	CHECK(hc_n == 2 && hc_types[1] == PT_FACTORY_RESET); /* the rejected request did not count */
+	pr.c.on_host_change = NULL;
+}
+
 static void test_meters_content(void)
 {
 	setup();
@@ -983,6 +1014,7 @@ int main(void)
 	RUN(test_preset_loaded_event);
 	RUN(test_sync_clock_switch);
 	RUN(test_subscribe_timing);
+	RUN(test_output_mode);
 	RUN(test_meters_content);
 	RUN(test_factory_reset);
 	T_DONE();

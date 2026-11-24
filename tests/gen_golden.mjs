@@ -176,7 +176,7 @@ const state = { type: T.STATE, fxId: [1, 2, 3, 4], bypass: [true, true, true, tr
   out.push('};');
   out.push(`#define G_STATE_UIMODE ${m.uiMode}`);
   out.push(`#define G_STATE_EDITSLOT ${m.editSlot}`);
-  out.push(`#define G_STATE_PAYLOAD_LEN ${fr.length > 0 ? 29 + 4 * nfx * 4 * 2 + 2 : 0}`);
+  out.push(`#define G_STATE_PAYLOAD_LEN ${fr.length > 0 ? 29 + 4 * nfx * 4 * 2 + 2 + 1 : 0}`); // + out_mode (rc4)
 }
 out.push('');
 out.push('#endif');
