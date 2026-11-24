@@ -98,6 +98,10 @@
  * watchdog feed) still run; counted as starve=. */
 #define STARVE_IDLE_CYC  (CPU_HZ / 20000u)   /* 50 us */
 #define STARVE_RUN       32
+/* Overload guard (dsp/engine.h engine_overload_feed): whole-block work above 85 % of the
+ * 64-frame period (64 / 48 kHz = 85,333 cycles at 64 MHz) for ENGINE_OVERLOAD_BLOCKS blocks
+ * in a row -> the engine switches off the most expensive slot (then global bypass). */
+#define OVERLOAD_LIMIT_CYC ((uint32_t)((uint64_t)BLK_FRAMES * CPU_HZ / FS_HZ * 85u / 100u))
 
 #if CONFIG_SP1FX_USB_AUDIO_IN_STREAM
 #define UAC2_NODE        DT_NODELABEL(uac2_io)
@@ -285,8 +289,10 @@ static void render_block(int16_t *dst, uint32_t *eng_cycles)
 		in_ramp.g = 0.0f;
 		g_playing = false;
 	} else {
-		memset(in_l, 0, sizeof(in_l));
-		memset(in_r, 0, sizeof(in_r));
+		for (int i = 0; i < BLK_FRAMES; i++) {   /* not memset: byte-wise in this libc */
+			in_l[i] = 0.0f;
+			in_r[i] = 0.0f;
+		}
 		g_playing = false;
 	}
 	if (f & UA_BLK_AUDIO) {
@@ -385,6 +391,7 @@ static void audio_thread(void *a, void *b, void *c)
 		render_block(blk, &ec);
 
 		bc = DWT->CYCCNT - tb;
+		(void)engine_overload_feed(&eng, bc, OVERLOAD_LIMIT_CYC);
 
 		if (eng.diag.cfg_applies != applies0 || eng.diag.slot_inits != inits0) {
 			g_apply_blocks++;
@@ -1029,8 +1036,9 @@ int main(void)
 	uint32_t loop_gap_max = 0, loop_gap_win = 0;    /* ms between main-loop iterations */
 	int64_t preset_posted_at = -1;
 	uint32_t settle_ms_last = 0;
+	uint8_t ovl_mask_seen = 0, ovl_forced_seen = 0;
 
-	CON_PRINTF("SP-1 FX usbaudio image %s: pool=%u B trim=%d dB fade_in=%d ms "
+	CON_PRINTF("SP-1 FX usbaudio image %s v3 (optimised DSP + overload guard): pool=%u B trim=%d dB fade_in=%d ms "
 		   "ring=%d target=%d low=%d high=%d kp=%d\r\n", IMAGE_NAME,
 		   (unsigned int)sizeof(engine_pool), CONFIG_SP1FX_UA_TRIM_DB,
 		   CONFIG_SP1FX_UA_FADE_IN_MS, CONFIG_SP1FX_UA_RING_FRAMES,
@@ -1096,6 +1104,7 @@ int main(void)
 		if (preset_pending >= 0 && now >= preset_apply_at) {
 			preset_idx = preset_pending;
 			preset_pending = -1;
+			engine_overload_clear(&eng);   /* a new preset gets a fresh chance */
 			preset_rejected = apply_preset(preset_idx);
 			preset_posted_at = now;
 			engine_set_duck(&eng, 0);
@@ -1132,6 +1141,23 @@ int main(void)
 				g_out_enable = false;
 				wait_silent();
 				apply_out(w);
+			}
+		}
+
+		{
+			/* overload guard actions (audio thread) -> one console line per change */
+			const uint8_t sm = eng.diag.shed_mask, fb_on = eng.diag.forced_bypass;
+
+			if (sm != ovl_mask_seen || fb_on != ovl_forced_seen) {
+				CON_PRINTF("OVERLOAD guard: shed_mask=0x%x (slots off:%s%s%s%s) forced_bypass=%u "
+					   "sheds=%u over_blocks=%u limit=%u cyc/blk preset=%d:%s\r\n",
+					   sm, (sm & 1u) ? " 0" : "", (sm & 2u) ? " 1" : "",
+					   (sm & 4u) ? " 2" : "", (sm & 8u) ? " 3" : "", fb_on,
+					   (unsigned int)eng.diag.overload_sheds,
+					   (unsigned int)eng.diag.overload_blocks,
+					   (unsigned int)OVERLOAD_LIMIT_CYC, preset_idx, preset_name(preset_idx));
+				ovl_mask_seen = sm;
+				ovl_forced_seen = fb_on;
 			}
 		}
 
@@ -1227,7 +1253,8 @@ int main(void)
 				CON_PRINTF("  diag stk audio=%u/%u main=%u/%u | apply_cyc max/last=%u/%u "
 					   "n=%u inits=%u settle_ms=%u%s | blk_cyc_max=%u | "
 					   "loop_gap_ms max/1s=%u/%u starve=%u i2s_sleep=%u | "
-					   "torn=%u lay_err=%u boots=%u\r\n",
+					   "torn=%u lay_err=%u boots=%u | ovl shed=0x%x forced=%u "
+					   "over_blk=%u\r\n",
 					   a_used, a_sz, m_used, m_sz, (unsigned int)g_apply_max,
 					   (unsigned int)g_apply_last, (unsigned int)g_apply_blocks,
 					   (unsigned int)eng.diag.slot_inits, (unsigned int)settle_ms_last,
@@ -1237,7 +1264,10 @@ int main(void)
 					   (unsigned int)g_i2s_recover_sleep,
 					   (unsigned int)eng.diag.torn_retries,
 					   (unsigned int)eng.diag.layout_errors,
-					   (unsigned int)crashdump_boots());
+					   (unsigned int)crashdump_boots(),
+					   (unsigned int)eng.diag.shed_mask,
+					   (unsigned int)eng.diag.forced_bypass,
+					   (unsigned int)eng.diag.overload_blocks);
 				loop_gap_win = 0;
 			}
 		}

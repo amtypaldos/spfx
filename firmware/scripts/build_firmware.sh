@@ -10,7 +10,9 @@
 #
 # Options (before the command):
 #   --app NAME   app under firmware/app/ to build (default: zephyr_min;
-#                also: zephyr_tone). Default output dir: build/firmware/NAME.
+#                also: zephyr_tone, zephyr_usbaudio, zephyr_fxprof, ...; the
+#                zephyr_ prefix may be left out: --app fxprof).
+#                Default output dir: build/firmware/NAME.
 #   --no-usb     add the app's no_usb.conf (zephyr_tone only: USB console off)
 #
 # Toolchain location: $SP1FX_TOOLCHAIN (default: <repo>/../toolchain).
@@ -161,6 +163,10 @@ while [ $# -gt 0 ]; do
   esac
 done
 case "$APP_NAME" in */*|.*|"") die "bad app name: $APP_NAME" ;; esac
+# short names: --app fxprof = --app zephyr_fxprof (likewise usbaudio, tone, ...)
+if [ ! -d "$FW/app/$APP_NAME" ] && [ -d "$FW/app/zephyr_$APP_NAME" ]; then
+  APP_NAME="zephyr_$APP_NAME"
+fi
 
 cmd="${1:-build}"
 case "$cmd" in

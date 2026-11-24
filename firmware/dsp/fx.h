@@ -36,7 +36,11 @@ typedef struct fx_desc {
 	const fx_param_desc *params;
 	uint32_t state_bytes;   /* sizeof(state struct) */
 	uint32_t mem_bytes;     /* extra delay memory, sized for 48 kHz */
-	uint16_t cpu_cycles;    /* declared estimate, cycles per stereo frame on Cortex-M4F */
+	/* Declared cost, cycles per stereo frame on the Cortex-M4F, used for admission. UNMEASURED
+	 * estimate: instruction-count emulation (tools/fxprof_emu) of the effect alone at its
+	 * worst-case params, minus the engine's fixed cost, x1.3 for flash wait states and
+	 * interrupts. Replace with fxprof image numbers (docs/BRINGUP_FXPROF.md) once measured. */
+	uint16_t cpu_cycles;
 	uint32_t tail_ms;       /* time the effect keeps ringing after input stops */
 	uint8_t mix_mode;
 	uint8_t stereo_independent; /* 1 if L and R never interact (for tests) */

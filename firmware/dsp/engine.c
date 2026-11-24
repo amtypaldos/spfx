@@ -86,6 +86,9 @@ void engine_init(engine_t *e, void *pool, uint32_t pool_bytes, float sr, uint32_
 	e->duck_cur = 1.0f;
 	e->ingain_cur = 1.0f;
 	e->master_cur = 0.0f; /* fade up from silence on start */
+	e->ig_db_cached = -1000.0f; /* never a valid setting: forces the first computation */
+	e->mg_cached = -1.0f;
+	e->overload_n = ENGINE_OVERLOAD_BLOCKS;
 }
 
 static uint32_t fx_cycles(int fx_id)
@@ -316,7 +319,8 @@ static int take(engine_t *e)
 		ENGINE_BARRIER();
 		uint32_t k = s1 >> 1;              /* newest complete post */
 		if (k == 0 || k == e->run_post) return 0;
-		memcpy(&e->stage, &e->box[k & 1], sizeof e->stage);
+		/* word copy: the firmware's libc memcpy is byte-wise (see fx_copy32) */
+		fx_copy32(&e->stage, &e->box[k & 1], sizeof e->stage / 4u);
 		HOOK(e, ENGINE_HOOK_TAKE_COPIED);
 		ENGINE_BARRIER();
 		uint32_t s2 = e->box_seq;
@@ -359,7 +363,7 @@ static void adopt(engine_t *e)
 		if (bad) { id[s] = FX_NONE; size[s] = 0; e->diag.layout_errors++; }
 	}
 
-	e->run = m->cfg;
+	fx_copy32(&e->run, &m->cfg, sizeof e->run / 4u);
 	for (int s = 0; s < ENGINE_SLOTS; s++) {
 		e->run.fx_id[s] = id[s];
 		e->run_off[s] = off[s];
@@ -381,7 +385,7 @@ static void init_slot(engine_t *e, int s)
 	const fx_desc *d = fx_get(e->pend_id[s]);
 	uint8_t *base = e->pool + e->run_off[s];
 	uint32_t st = fx_align8(d->state_bytes);
-	memset(base, 0, st);
+	fx_zero32(base, st / 4u);
 	d->init(base, base + st, e->sr);
 	e->live_id[s] = d->id;
 	e->live_st[s] = base;
@@ -392,6 +396,9 @@ static void init_slot(engine_t *e, int s)
 	e->in_cur[s] = 0.0f;
 	for (int i = 0; i < FX_MAX_PARAMS; i++) e->pushed[s][i] = -1.0f; /* force push */
 	e->pend_id[s] = FX_NONE;
+	e->shed[s] = 0;              /* a new effect instance gets a fresh chance */
+	e->diag.shed_mask &= (uint8_t)~(1u << s);
+	e->chunk_inits = 1;
 	e->diag.slot_inits++;
 }
 
@@ -415,8 +422,57 @@ static void run_inits(engine_t *e, int unlimited)
 
 static void apply_pending(engine_t *e, int unlimited)
 {
+	uint32_t req = e->shed_clear_req;
+	if (req != e->shed_clear_ack) {
+		e->shed_clear_ack = req;
+		for (int s = 0; s < ENGINE_SLOTS; s++) e->shed[s] = 0;
+		e->forced_bypass = 0;
+		e->over_run = 0;
+		e->diag.shed_mask = 0;
+		e->diag.forced_bypass = 0;
+	}
 	if (take(e)) adopt(e);
 	run_inits(e, unlimited);
+}
+
+void engine_overload_clear(engine_t *e)
+{
+	e->shed_clear_req = e->shed_clear_req + 1u;
+}
+
+int engine_overload_feed(engine_t *e, uint32_t cycles, uint32_t limit)
+{
+	int inits = e->chunk_inits;
+	e->chunk_inits = 0;
+	if (e->overload_n == 0) return 0;
+	if (cycles <= limit) { e->over_run = 0; return 0; }
+	e->diag.overload_blocks++;
+	if (inits) return 0;           /* effect init (memory clear) is a one-off, not overload */
+	if (++e->over_run < e->overload_n) return 0;
+	e->over_run = 0;
+
+	/* the most expensive slot that still runs (declared cost; later in the chain on a tie) */
+	int best = -1;
+	uint32_t best_c = 0;
+	for (int k = 0; k < ENGINE_SLOTS; k++) {
+		int s = e->run.order[k];
+		const fx_desc *d = fx_get(e->live_id[s]);
+		if (!d || e->live_id[s] == FX_NONE || e->shed[s] || !e->active[s]) continue;
+		if (best < 0 || d->cpu_cycles >= best_c) { best = s; best_c = d->cpu_cycles; }
+	}
+	if (best >= 0) {
+		e->shed[best] = 1;        /* fades out in the next chunk, then stops */
+		e->diag.shed_mask |= (uint8_t)(1u << best);
+		e->diag.overload_sheds++;
+		return 1;
+	}
+	if (!e->forced_bypass) {
+		e->forced_bypass = 1;
+		e->diag.forced_bypass = 1;
+		e->diag.overload_forced++;
+		return 1;
+	}
+	return 0;
 }
 
 void engine_pump(engine_t *e)
@@ -449,22 +505,30 @@ static float master_gain(float v)
 	return powf(10.0f, (v - 1.0f) * 60.0f / 20.0f); /* -60 dB .. 0 dB */
 }
 
+/* Smoothed values (one-pole) snap to their target once within this distance, so the
+ * steady state runs the cheap constant-gain loops. A float one-pole with k ~ 1e-3 stalls up
+ * to ~2e-4 short of a target near 4 (k * diff < half an ULP), so the snap must be at least
+ * that wide; 5e-4 of a gain is a -66 dBFS step on a full-scale signal (inaudible). */
+#define SNAP 5e-4f
+
 static void process_chunk(engine_t *e, float *L, float *R, int n)
 {
 	float wl[FX_MAX_BLOCK], wr[FX_MAX_BLOCK];
-	float dl[FX_MAX_BLOCK], dr[FX_MAX_BLOCK];
+	const float k_in = e->k_in, k_mix = e->k_mix;
 
 	for (int k = 0; k < ENGINE_SLOTS; k++) {
 		int s = e->run.order[k];
 		const fx_desc *d = fx_get(e->live_id[s]);
 		if (!d || e->live_id[s] == FX_NONE) continue;
 
-		int enabled = !e->run.bypass[s] && !e->run.global_bypass;
+		int shed = e->shed[s];
+		int enabled = !e->run.bypass[s] && !e->run.global_bypass && !e->forced_bypass && shed != 2;
 		int send = d->mix_mode == FX_MIX_SEND;
 		uint32_t tail_len = (uint32_t)(((d->tail_ms > 60u ? d->tail_ms : 60u) * e->sr) / 1000.0f);
 
 		if (enabled) e->tail_rem[s] = tail_len;
 		else if (e->tail_rem[s] > 0) e->tail_rem[s] = e->tail_rem[s] > (uint32_t)n ? e->tail_rem[s] - (uint32_t)n : 0;
+		if (shed == 2 || e->forced_bypass) e->tail_rem[s] = 0; /* overload: no tails either */
 
 		if (!enabled && e->tail_rem[s] == 0) {
 			if (e->active[s]) { d->reset(e->live_st[s]); e->active[s] = 0; }
@@ -478,12 +542,33 @@ static void process_chunk(engine_t *e, float *L, float *R, int n)
 		float mix_t = e->run.global_bypass ? 0.0f : (send ? e->run.wet[s] : (enabled ? e->run.wet[s] : 0.0f));
 		float in_t = (send ? (enabled ? 1.0f : 0.0f) : 1.0f);
 		float mc = e->mix_cur[s], ic = e->in_cur[s];
-		for (int i = 0; i < n; i++) {
-			dl[i] = L[i];
-			dr[i] = R[i];
-			ic += e->k_in * (in_t - ic);
-			wl[i] = L[i] * ic;
-			wr[i] = R[i] * ic;
+
+		if (!send && shed == 0 && ic == 1.0f && in_t == 1.0f && mc == 1.0f && mix_t == 1.0f) {
+			/* fully wet insert effect, nothing ramping: process the chain buffers in place */
+			d->process(e->live_st[s], L, R, n);
+			float chk = 0.0f;
+			for (int i = 0; i < n; i++) chk += L[i] + R[i];
+			if (fx_bad(chk) || fabsf(chk) > 1e9f) {
+				d->reset(e->live_st[s]);
+				e->diag.nan_events++;
+				for (int i = 0; i < n; i++) L[i] = R[i] = 0.0f; /* = the general path's result */
+			}
+			continue;
+		}
+
+		/* effect input (L/R stay untouched: they are the dry signal for the mix) */
+		if (ic == in_t) {
+			for (int i = 0; i < n; i++) {
+				wl[i] = L[i] * ic;
+				wr[i] = R[i] * ic;
+			}
+		} else {
+			for (int i = 0; i < n; i++) {
+				ic += k_in * (in_t - ic);
+				wl[i] = L[i] * ic;
+				wr[i] = R[i] * ic;
+			}
+			if (fabsf(in_t - ic) < SNAP) ic = in_t;
 		}
 		d->process(e->live_st[s], wl, wr, n);
 
@@ -495,19 +580,71 @@ static void process_chunk(engine_t *e, float *L, float *R, int n)
 			for (int i = 0; i < n; i++) wl[i] = wr[i] = 0.0f;
 		}
 
-		for (int i = 0; i < n; i++) {
-			mc += e->k_mix * (mix_t - mc);
-			if (send) {
-				L[i] = dl[i] + wl[i] * mc;
-				R[i] = dr[i] + wr[i] * mc;
-			} else {
-				L[i] = dl[i] + (wl[i] - dl[i]) * mc;
-				R[i] = dr[i] + (wr[i] - dr[i]) * mc;
+		if (shed == 1) {
+			/* overload guard: fade this slot out linearly over this chunk, then stop it */
+			float step = mc / (float)n;
+			for (int i = 0; i < n; i++) {
+				mc -= step;
+				if (mc < 0.0f) mc = 0.0f;
+				if (send) {
+					L[i] += wl[i] * mc;
+					R[i] += wr[i] * mc;
+				} else {
+					L[i] += (wl[i] - L[i]) * mc;
+					R[i] += (wr[i] - R[i]) * mc;
+				}
 			}
+			mc = 0.0f;
+			ic = 0.0f;
+			e->shed[s] = 2;
+			e->tail_rem[s] = 0;
+		} else if (mc == mix_t) {
+			if (send) {
+				for (int i = 0; i < n; i++) {
+					L[i] += wl[i] * mc;
+					R[i] += wr[i] * mc;
+				}
+			} else {
+				for (int i = 0; i < n; i++) {
+					L[i] += (wl[i] - L[i]) * mc;
+					R[i] += (wr[i] - R[i]) * mc;
+				}
+			}
+		} else {
+			for (int i = 0; i < n; i++) {
+				mc += k_mix * (mix_t - mc);
+				if (send) {
+					L[i] += wl[i] * mc;
+					R[i] += wr[i] * mc;
+				} else {
+					L[i] += (wl[i] - L[i]) * mc;
+					R[i] += (wr[i] - R[i]) * mc;
+				}
+			}
+			if (fabsf(mix_t - mc) < SNAP) mc = mix_t;
 		}
 		e->mix_cur[s] = mc;
 		e->in_cur[s] = ic;
 	}
+}
+
+/* Per-block gain targets: libm powf only when the setting changed. */
+static float in_gain_target(engine_t *e)
+{
+	if (e->run.in_gain_db != e->ig_db_cached) {
+		e->ig_db_cached = e->run.in_gain_db;
+		e->ig_t_cached = powf(10.0f, e->run.in_gain_db / 20.0f);
+	}
+	return e->ig_t_cached;
+}
+
+static float master_target(engine_t *e)
+{
+	if (e->run.master != e->mg_cached) {
+		e->mg_cached = e->run.master;
+		e->mg_t_cached = master_gain(e->run.master);
+	}
+	return e->mg_t_cached;
 }
 
 void engine_process(engine_t *e, const float *in_l, const float *in_r, float *out_l, float *out_r, int n)
@@ -517,47 +654,90 @@ void engine_process(engine_t *e, const float *in_l, const float *in_r, float *ou
 	while (done < n) {
 		int m = n - done;
 		if (m > FX_MAX_BLOCK) m = FX_MAX_BLOCK;
+		const float *il = in_l + done, *ir = in_r + done;
 
 		/* config hand-over: only here, at the start of a chunk, on this thread */
 		apply_pending(e, 0);
 
-		float g_t = powf(10.0f, e->run.in_gain_db / 20.0f);
-		float ig = e->ingain_cur;
+		/* input: NaN/Inf screen once per chunk (a sum is non-finite iff a term is, or it
+		 * overflowed), then gain, peak and clip count with everything in registers */
+		float chk = 0.0f;
+		for (int i = 0; i < m; i++) chk += il[i] + ir[i];
+		int bad = fx_bad(chk);
+		float g_t = in_gain_target(e);
+		float ig = e->ingain_cur, k_gain = e->k_gain;
 		float ipk = 0.0f;
+		uint32_t clips = 0;
+		int ig_const = ig == g_t;
+		/* peaks as the integer bits of |x| (orders like the float for finite x >= 0) */
+		uint32_t pk_bits = 0;
 		for (int i = 0; i < m; i++) {
-			float a = in_l[done + i], b = in_r[done + i];
-			if (fx_bad(a)) a = 0.0f;
-			if (fx_bad(b)) b = 0.0f;
-			float pa = fabsf(a), pb = fabsf(b);
-			if (pa > ipk) ipk = pa;
-			if (pb > ipk) ipk = pb;
-			if (pa >= 0.999f || pb >= 0.999f) e->diag.in_clips++;
-			ig += e->k_gain * (g_t - ig);
+			float a = il[i], b = ir[i];
+			if (bad) {
+				if (fx_bad(a)) a = 0.0f;
+				if (fx_bad(b)) b = 0.0f;
+			}
+			uint32_t ua, ub;
+			memcpy(&ua, &a, 4);
+			memcpy(&ub, &b, 4);
+			ua &= 0x7FFFFFFFu;
+			ub &= 0x7FFFFFFFu;
+			if (ua > pk_bits) pk_bits = ua;
+			if (ub > pk_bits) pk_bits = ub;
+			if (!ig_const) ig += k_gain * (g_t - ig);
 			L[i] = a * ig;
 			R[i] = b * ig;
 		}
+		memcpy(&ipk, &pk_bits, 4);
+		if (ipk >= 0.999f) {
+			for (int i = 0; i < m; i++) {
+				float pa = fabsf(il[i]), pb = fabsf(ir[i]);
+				if ((pa >= 0.999f || pb >= 0.999f) && !fx_bad(pa) && !fx_bad(pb)) clips++;
+			}
+		}
+		if (!ig_const && fabsf(g_t - ig) < SNAP) ig = g_t;
 		e->ingain_cur = ig;
+		e->diag.in_clips += clips;
 		e->diag.in_peak = ipk > e->diag.in_peak ? ipk : e->diag.in_peak;
 
 		process_chunk(e, L, R, m);
 
-		float mg_t = master_gain(e->run.master);
+		float mg_t = master_target(e);
 		float mg = e->master_cur;
 		float dk = e->duck_cur, dk_t = e->duck ? 0.0f : 1.0f;
+		const float k_master = e->k_master, k_duck = e->k_duck;
 		float opk = 0.0f;
-		for (int i = 0; i < m; i++) {
-			mg += e->k_master * (mg_t - mg);
-			dk += e->k_duck * (dk_t - dk);
-			float a = L[i] * mg * dk, b = R[i] * mg * dk;
-			float pa = fabsf(a), pb = fabsf(b);
-			if (pa > opk) opk = pa;
-			if (pb > opk) opk = pb;
-			if (pa > 1.0f || pb > 1.0f) e->diag.out_clips++;
-			out_l[done + i] = soft_limit(a);
-			out_r[done + i] = soft_limit(b);
+		uint32_t oclips = 0;
+		float *ol = out_l + done, *orr = out_r + done;
+		if (mg == mg_t && dk == dk_t) {
+			const float g = mg * dk;
+			for (int i = 0; i < m; i++) {
+				float a = L[i] * g, b = R[i] * g;
+				float pa = fabsf(a), pb = fabsf(b);
+				float p = pa > pb ? pa : pb;
+				if (p > opk) opk = p;
+				if (p > 1.0f) oclips++;
+				ol[i] = p < 0.8f ? a : soft_limit(a);
+				orr[i] = p < 0.8f ? b : soft_limit(b);
+			}
+		} else {
+			for (int i = 0; i < m; i++) {
+				mg += k_master * (mg_t - mg);
+				dk += k_duck * (dk_t - dk);
+				float a = L[i] * mg * dk, b = R[i] * mg * dk;
+				float pa = fabsf(a), pb = fabsf(b);
+				float p = pa > pb ? pa : pb;
+				if (p > opk) opk = p;
+				if (p > 1.0f) oclips++;
+				ol[i] = soft_limit(a);
+				orr[i] = soft_limit(b);
+			}
+			if (fabsf(mg_t - mg) < SNAP) mg = mg_t;
+			if (fabsf(dk_t - dk) < SNAP) dk = dk_t;
 		}
 		e->master_cur = mg;
 		e->duck_cur = dk;
+		e->diag.out_clips += oclips;
 		e->diag.out_peak = opk > e->diag.out_peak ? opk : e->diag.out_peak;
 		e->diag.blocks++;
 		done += m;

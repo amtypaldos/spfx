@@ -577,7 +577,7 @@ static void test_bad_arguments(void)
 
 static void test_admission(void)
 {
-	setup(); /* filter, chorus, delay, reverb: ~126 KB of 150 KB */
+	setup_budget(2000); /* filter, chorus, delay, reverb: ~126 KB of 150 KB; CPU never the limit here */
 	/* code 2: a second delay does not fit in memory */
 	feed(g_req_set_slot_fx, sizeof g_req_set_slot_fx); /* slot 1 -> flanger fits */
 	CHECK(eng.cfg.fx_id[1] == FX_FLANGER);
@@ -590,7 +590,7 @@ static void test_admission(void)
 	CHECK(count_type(PT_EVENT) == 0);
 
 	/* code 3: CPU budget */
-	setup_budget(600); /* default set uses 590 cycles */
+	setup_budget(800); /* default set uses 130+200+210+240 = 780 cycles */
 	clear_tx();
 	uint8_t b[2] = {0, FX_CHORUS};
 	request(PT_SET_SLOT_FX, 6, b, 2);

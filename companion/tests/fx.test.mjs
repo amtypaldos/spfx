@@ -68,8 +68,9 @@ test('admission arithmetic', () => {
   assert.equal(POOL_BYTES, 153600);
   assert.equal(checkAdmission([delay, reverb]).ok, true);
   assert.equal(checkAdmission([delay, delay, reverb]).code, 2);          // 196720 B > 153600
-  assert.equal(checkAdmission(Array(3).fill(reverb)).code, 3);          // 960 cycles > 850, memory fits
-  assert.equal(checkAdmission([reverb, reverb, reverb, reverb]).code, 3);   // CPU is checked first (as in firmware engine_assign): 1280 > 850, memory would also fail
+  const chorus = fxTable[2], tape = fxTable[10];
+  assert.equal(checkAdmission([delay, reverb, tape, chorus]).code, 3);  // 210+240+255+200 = 905 cycles > 850, memory fits
+  assert.equal(checkAdmission([reverb, reverb, reverb, reverb]).code, 3);   // CPU is checked first (as in firmware engine_assign): 960 > 850, memory would also fail
   assert.equal(CPU_BUDGET, 850);
 });
 

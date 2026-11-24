@@ -1,0 +1,26 @@
+# SP-1 FX effect CPU profiling image (docs/BRINGUP_FXPROF.md).
+
+source "samples/subsys/usb/common/Kconfig.sample_usbd"
+
+config SP1FX_USB_CONSOLE
+	bool "USB CDC ACM console (FXPROF result lines)"
+	default y
+	depends on USB_DEVICE_STACK_NEXT && USBD_CDC_ACM_CLASS && UART_INTERRUPT_DRIVEN
+
+config SP1FX_FXPROF_BLOCKS
+	int "Timed 64-frame blocks per case"
+	default 600
+
+config SP1FX_FXPROF_WARMUP
+	int "Untimed blocks per case before timing (effect init, smoothing settles)"
+	default 1000
+
+config SP1FX_FXPROF_PAUSE_MS
+	int "Pause after each result line (ms)"
+	default 1000
+
+config SP1FX_ENGINE_POOL_KIB
+	int "DSP engine memory pool (KiB, static .bss)"
+	default 150
+
+source "Kconfig.zephyr"

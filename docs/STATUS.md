@@ -19,10 +19,72 @@ Evidence key: **[HOST]** verified by automated tests on a development Mac. **[SR
 | Preset cycling (ADR-004) | FN + rocker, fade, flash + position bar, `PRESET_LOADED` event, C + companion. **[HOST]** Device-side user presets: **[TODO]** |
 | Guide (`docs/guide/`) | printable quick-reference (schematic device drawing). |
 
-## Test results (`make test`: 6 C suites; `node --test companion/tests/*.test.mjs`: 55; all pass)
+## CPU: why effects were ~4x the declared cost (2026-11-24, v3)
+
+Evidence key here: **[HW]** measured on the device by the owner, **[ELF]** read from the built
+image (objdump/nm), **[SIM]** instruction-count emulation (`tools/fxprof_emu`, Unicorn +
+Cortex-M4 cost table, zero-wait-state memory, no interrupts; not a measurement),
+**[HOST]** host tests. Nothing below except the [HW] line was run on an SP-1.
+
+- [HW] v2 image: Clean ~138 cycles/frame; every effect preset 2,270-2,430 (170-200 %) -> static.
+- **Not the cause [ELF]:** the FPU is used: `-mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard`,
+  `CONFIG_FP_HARDABI=y`; no `__aeabi_f*`/`__addsf3`/`__mulsf3` in the image; `-O2`
+  (`CONFIG_SPEED_OPTIMIZATIONS`) is applied to the DSP sources; the nRF52 I-cache is enabled
+  (`CONFIG_NRF_ENABLE_ICACHE`, `soc.c`). libm in per-sample loops: only `floorf` (compressor every
+  sample via `fx_exp2`, bitcrusher per held sample); `powf`/`expf`/`tanf`/`logf` were per block
+  or per parameter change. Denormals: effects already flush their state; the M4 FPU has no
+  denormal slow path as far as I know (source finding, unverified); a branch-free flush is now
+  used in the reverb loop anyway.
+- **Cause 1 [SIM]: the code really costs that much; the declared values were guesses ~3x low
+  and left out the engine's own cost.** Model of the v2 code: Clean 132, Dub Station 1710 cycles/
+  frame (reverb alone 580, delay 156, filter 111, saturation 98, engine glue 350). [HW]/[SIM]
+  ratio for Dub Station ~1.36 (interrupts ~60-80/frame + flash wait states), consistent.
+- **Cause 2 [ELF]: byte-wise `memcpy`/`memset`.** The toolchain's size-optimised picolibc
+  `memcpy` is `ldrb/strb` one byte per loop (~5 cycles/byte). GCC turned the engine's per-slot
+  dry-copy loops into `memcpy` calls: ~48 cycles/frame **per active slot** (190 of Dub Station's
+  1710); every parameter change copied the ~900 B config twice byte-wise (+~190/frame while a
+  fader moves); effect init/reset cleared up to 77 KB byte-wise (~6 ms in one 1.33 ms block);
+  the USB ring copies were byte-wise too.
+- **Cause 3 [SIM]: per-sample overhead from code shape:** state accessed through pointers
+  (Zephyr builds with `-fno-strict-aliasing`, so every store reloads every field), per-sample
+  `switch`, per-sample clamps/LFOs, per-sample one-pole smoothing that never settles in float.
+
+What changed (v3), all [HOST]-tested, cost [SIM] (before -> after, cycles/frame):
+| Change | Effect |
+|---|---|
+| Engine: no dry copy (the chain buffer IS the dry signal), in-place processing for 100 %-wet insert effects, smoothers snap to target (5e-4) so steady state runs constant-gain loops, gain targets (`powf`) recomputed only on change, NaN screen once per block, peaks as integer max, word copies (`fx_copy32`) for the mailbox | Clean 132 -> 97; per-slot glue ~60 -> ~25 |
+| `fx_zero32`/`fx_copy32`, `fx_floori` (no `floorf`), `-fno-tree-loop-distribute-patterns` on the DSP, usbaudio `main.c` and `usb_audio_core.c` (no libc calls in the audio path: checked in the ELF) | |
+| **Reverb at 12 kHz** (4:1 average-decimate, network, linear 1:4 upsample), block-rate LFOs, state in locals. **Intentional lo-fi** (owner decision): tail band-limited to ~5 kHz, some aliasing/imaging, 4-sample latency | 580 -> ~180 (incl. glue) |
+| Delay: steady time = whole-sample delay (no interpolation), state in locals; glide path unchanged | 156 -> ~110 |
+| Chorus/flanger/tape wobble: LFO every 16 samples, delay ramped linearly in between (< 0.02 sample deviation); tape drift low-pass at the 16-sample rate (variance-matched noise; its random sequence changed) | ~200/290 -> ~150/195 |
+| Saturation and filter drive: **cubic soft clipper** `fx_softclip` (no divide) instead of the rational tanh: harder knee (within 0.1 of `fx_tanh`), **intentional sound change** | |
+| Compressor: detector/gain computer once per 4 frames, gain ramped linearly | ~110 -> ~80 |
+| Filter: per-sample `switch` -> mode coefficients; tremolo: one loop per waveform; bitcrusher: `fx_floori` | |
+| **Overload guard** (`engine_overload_feed`, usbaudio v3): block work > 85 % of the period for 8 blocks -> fade out + switch off the most expensive live slot, then forced global bypass; `OVERLOAD` console line, `diag` fields; cleared by a preset change / new effect in the slot | [HOST] `tests/test_fxprof_core.c` |
+| **Declared `cpu_cycles` now (UNMEASURED)**: [SIM] worst-case cost of the effect alone minus Clean, x1.3: Filter 130, Chorus 200, Delay 210, Reverb 240, Saturation 115, Flanger 200, Bitcrusher 125, Tremolo 115, Compressor 110, Tape wobble 255 (was 70/120/80/320/90/120/40/45/110/120). Budget stays 850. Companion table + golden frames updated. | presets: Dub 695, Boom Bap 590, House 780, Lo-Fi 625, Ambient 765 declared |
+
+[SIM] presets now: Dub Station 673, Boom Bap 607, House 713, Lo-Fi Tape 607, Ambient 771 cycles/
+frame (were 1710/1615/1800/1256/1849). Expected on the device x1.3-1.4 plus interrupts:
+**~900-1100 = 68-83 %, untested**; House and Ambient are closest to the guard's 85 %.
+Output vs the v2 code on the fxprof signal [HOST, scratch comparison, 2 s per case]: Clean,
+filter (no drive), delay, bitcrusher, tremolo differ by < 3e-4 (difference 68-80 dB below the
+signal: the smoother snap); filter drive, saturation, compressor, chorus/flanger, tape wobble,
+reverb differ by design (waveform SNR 2-29 dB; for modulated delays that is mostly a sub-sample
+time shift, not noise). Not listened to. Tests: no existing accuracy test was loosened; only the
+admission-arithmetic tests (C and companion JS) were updated for the new declared values.
+Reverb memory declaration kept at 43,116 B (uses 10,868) to keep memory admission and the
+protocol unchanged.
+
+Images (built, check_image PASS, reproducible, **not run on hardware**): `sp1fx-fxprof.bin`
+(SHA-256 81c9b1de...0443; profiling, silent, docs/BRINGUP_FXPROF.md) and
+`sp1fx-usbaudio-in-v3.bin` (315d7eef...e00f; docs/BRINGUP_USBAUDIO.md "v3").
+Next: owner runs fxprof -> replace the declared values with measured ones.
+
+## Test results (`make test`: 12 C test binaries; `node --test companion/tests/*.test.mjs`: 55; all pass)
 - Also: `test_storage` 1,426 checks, `test_protocol` 903, `test_presets` 557, `test_controls` 172.
 - `test_dsp`: 2,382 checks. Parameter map/unmap, silence, 16 parameter corners x every effect with loud noise, automation stability, stereo isolation, filter frequency response (LP/HP), delay timing exact to the sample, feedback ratio, reverb decay, chorus delay, tremolo depth, compressor level, fast-math accuracy, recovery after NaN.
-- `test_engine`: 36,924 checks. Wet/dry, bypass, global bypass, assignment preserves wet/bypass and per-effect params, memory + CPU admission with rollback, 2,000 random reassignments never overlap memory, multiple instances, NaN/Inf input, hot-signal limiter, no pops when switching effects, tails survive bypass, config repair, chain order.
+- `test_fxprof_core`: 250,922 checks. Every profiling case admitted, finite, bounded, not silent; signal deterministic and looping; overload guard (spikes ignored, sheds most expensive slot first, fade without click, forced bypass, clear, init blocks ignored, disabled); `fx_floori` exact vs floorf, `fx_exp2`, `fx_softclip` (odd, monotonic, bounded, within 0.1 of fx_tanh), `fx_flush_fast` (exact above 2e-11, never denormal), word copy/clear, `fx_dl_q` identical to the old rounding.
+- `test_engine`: 36,926 checks. Wet/dry, bypass, global bypass, assignment preserves wet/bypass and per-effect params, memory + CPU admission with rollback, 2,000 random reassignments never overlap memory, multiple instances, NaN/Inf input, hot-signal limiter, no pops when switching effects, tails survive bypass, config repair, chain order.
 - `test_controls`: 119 checks. Debounce, tap vs hold, rocker only on held channel (and only if pressed after it), wrap-around, repeat, chord, PLAY, volume steps/repeat, edit mode, soft takeover (approach, cross-over, jitter, NaN, resync), FN-hold power-off, admission error LED, LED encodings, sync scheduling over a simulated 10 min.
 
 ### Bugs the tests found (fixed)
@@ -34,7 +96,7 @@ Evidence key: **[HOST]** verified by automated tests on a development Mac. **[SR
 - Replacing an effect drops the old effect's tail abruptly (new effect fades in, old one is cut). Acceptable for now; revisit with cross-fade.
 - Saturation and bitcrusher are not oversampled; aliasing at high settings is expected.
 - Delay max 400 ms (RAM); reverb ~43 KB; delay ~77 KB. With a 150 KB pool, "delay + two reverbs" is rejected by design.
-- CPU numbers in effect descriptors are **estimates**. Host speed is not a proxy. Real cycle counts need the Cortex-M4F (DWT cycle counter).
+- CPU numbers in effect descriptors are **UNMEASURED estimates** (instruction-count emulation x1.3, see "CPU" above). Host speed is not a proxy. Real numbers: run `sp1fx-fxprof.bin` (docs/BRINGUP_FXPROF.md).
 - 8 LEDs, each a single dimmable LED (4 track + 4 beside PLAY). "Length" encodings are impossible; patterns use brightness/blink only. PWM gamma and visibility floor need tuning on a device.
 - Rocker is two momentary buttons; button ladder decode thresholds still to be taken from upstream (calibrated raw ADC values).
 - Soft-takeover pickup window (2.5%) and deadband (0.4%) are guesses pending real fader noise measurements.
@@ -68,3 +130,4 @@ Evidence key: **[HOST]** verified by automated tests on a development Mac. **[SR
 - 2026-11-24 (owner-run, console-captured): `sp1fx-usbaudio-in.bin` (v1) OBSERVED: USB audio from a Mac plays through the real engine on the SP-1 (speaker), 48 kHz, drift feedback converged (~48.000 frames/ms), 60+ s with 0 underruns/overruns/I2S errors; first real CPU numbers: Clean preset (all bypassed) about 130-215 cycles/frame average, peaks 400-490; the Mac cannot control the volume (no UAC2 volume control); output peak only -15 dBFS because master 75% and the analog stages were set quiet on purpose. **CRASH OBSERVED:** the first FN tap (Clean -> Dub Station) hung the firmware: static, then silence, watchdog reset (`rr=2`) after about 5 s, device recovered by itself and the Mac stream resumed.
 - Crash analysis (subagent, not reproduced on hardware): two real engine bugs found and fixed (non-atomic `engine_apply_config` race with the audio thread; unchanged slots kept running at a stale layout after a config change), neither proven to be THE cause. Leading unproven hypothesis: Dub Station costs more CPU than the budget on the real M4F, so the priority-0 audio thread starves the main thread and the watchdog feed. Mitigations in v2: staged-config mailbox, init budget per block, starvation guard, audio stack 6 KB, crash dump (`CRASH:` line on next boot) and diagnostics (`diag` line). v2 images: `sp1fx-usbaudio-in-v2.bin` (SHA-256 9da4341d...5cd3), `sp1fx-usbaudio-io-v2.bin` (fb8b3efa...2ab7). NOT yet flashed. Retest steps: docs/BRINGUP_USBAUDIO.md.
 - Declared effect CPU costs in the effect descriptors are estimates written before any measurement; the Clean passthrough already costs more than expected, so treat all declared numbers as unreliable until measured per preset on the device.
+- 2026-11-24 (owner-run, console): `sp1fx-usbaudio-in-v2.bin` OBSERVED: no crash on preset changes, but Clean ~138 cycles/frame and every effect preset 2,270-2,430 cycles/frame (170-200 % CPU), audio static. Analysis and fix (not yet run on hardware): see "CPU" section; new images `sp1fx-fxprof.bin`, `sp1fx-usbaudio-in-v3.bin`.

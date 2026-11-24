@@ -73,33 +73,63 @@ static void process(void *st, float *l, float *r, int n)
 {
 	delay_t *s = st;
 	if (s->dirty) update(s);
-	float fb = s->fb, c = s->cross, a = s->damp_a;
+	const float fb = s->fb, c = s->cross, a = s->damp_a;
+	const float c1 = 1.0f - c;
 	float lpl = s->lp[0], lpr = s->lp[1];
 	float d = s->d_cur;
-	for (int i = 0; i < n; i++) {
-		/* One-pole glide, but with a minimum step: a plain one-pole stalls ~1-4 samples
-		 * short of the target once k*diff falls below one float ULP (found by test). */
-		float diff = s->d_tgt - d;
-		float step = s->k_glide * diff;
-		if (fabsf(step) < 0.004f) step = fabsf(diff) < 0.004f ? diff : (diff > 0.0f ? 0.004f : -0.004f);
-		d += step;
-		float yl = fx_dl_read(&s->dl[0], d);
-		float yr = fx_dl_read(&s->dl[1], d);
-		lpl += a * (yl - lpl);
-		lpr += a * (yr - lpr);
-		float fl = fb * ((1.0f - c) * lpl + c * lpr);
-		float fr = fb * ((1.0f - c) * lpr + c * lpl);
-		fx_dl_write(&s->dl[0], l[i] + fl);
-		fx_dl_write(&s->dl[1], r[i] + fr);
-		l[i] = yl;
-		r[i] = yr;
+	const float tgt = s->d_tgt, kg = s->k_glide;
+	int16_t *const bl = s->dl[0].buf, *const br = s->dl[1].buf;
+	const uint32_t size = s->dl[0].size;
+	uint32_t w = s->dl[0].w; /* both lines always advance together */
+	const float maxd = (float)(size - 2);
+
+	if (d == tgt) {
+		/* steady time: a whole-sample delay (the time is rounded to 1/48 ms, inaudible for
+		 * an echo), so one read per channel and no interpolation */
+		float dd = d < 1.0f ? 1.0f : (d > maxd ? maxd : d);
+		const int32_t k = (int32_t)(dd + 0.5f);
+		int32_t ia = (int32_t)w - k;
+		if (ia < 0) ia += (int32_t)size;
+		for (int i = 0; i < n; i++) {
+			float yl = (float)bl[ia] * (1.0f / FX_DL_SCALE);
+			float yr = (float)br[ia] * (1.0f / FX_DL_SCALE);
+			if (++ia >= (int32_t)size) ia = 0;
+			lpl += a * (yl - lpl);
+			lpr += a * (yr - lpr);
+			bl[w] = fx_dl_q(l[i] + fb * (c1 * lpl + c * lpr));
+			br[w] = fx_dl_q(r[i] + fb * (c1 * lpr + c * lpl));
+			if (++w >= size) w = 0;
+			l[i] = yl;
+			r[i] = yr;
+		}
+	} else {
+		for (int i = 0; i < n; i++) {
+			/* One-pole glide, but with a minimum step: a plain one-pole stalls ~1-4 samples
+			 * short of the target once k*diff falls below one float ULP (found by test). */
+			float diff = tgt - d;
+			float step = kg * diff;
+			if (fabsf(step) < 0.004f) step = fabsf(diff) < 0.004f ? diff : (diff > 0.0f ? 0.004f : -0.004f);
+			d += step;
+			float dd = d < 1.0f ? 1.0f : (d > maxd ? maxd : d);
+			float yl = fx_dl_read_at(bl, size, w, dd);
+			float yr = fx_dl_read_at(br, size, w, dd);
+			lpl += a * (yl - lpl);
+			lpr += a * (yr - lpr);
+			bl[w] = fx_dl_q(l[i] + fb * (c1 * lpl + c * lpr));
+			br[w] = fx_dl_q(r[i] + fb * (c1 * lpr + c * lpl));
+			if (++w >= size) w = 0;
+			l[i] = yl;
+			r[i] = yr;
+		}
 	}
+	s->dl[0].w = w;
+	s->dl[1].w = w;
 	s->d_cur = d;
 	s->lp[0] = fx_flush(lpl);
 	s->lp[1] = fx_flush(lpr);
 }
 
 const fx_desc fx_desc_delay = {
-	FX_DELAY, "Delay", 4, P, sizeof(delay_t), MAX_SAMPLES * 2 * sizeof(int16_t), 80, 15000,
+	FX_DELAY, "Delay", 4, P, sizeof(delay_t), MAX_SAMPLES * 2 * sizeof(int16_t), 210, 15000,
 	FX_MIX_SEND, 0, init, reset, set_param, process,
 };

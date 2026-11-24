@@ -123,8 +123,8 @@ test('mock: meters only while subscribed, with budget-based CPU and memory', asy
   for (let i = 0; i < 10; i++) { dev.tick(100); await settle(1); }
   const mt = store.model.meters;
   assert.equal(mt.memUsed, 76800 + 43120);
-  // active cycles 90+70+80+320 = 560 (+60 base) / 850 ~ 73%
-  assert.ok(mt.cpuPct >= 72 && mt.cpuPct <= 76, `cpu ${mt.cpuPct}`);
+  // active cycles 115+130+210+240 = 695 (+60 base) / 850 ~ 89%
+  assert.ok(mt.cpuPct >= 87 && mt.cpuPct <= 91, `cpu ${mt.cpuPct}`);
   assert.ok(mt.inPeak > 0 && mt.outPeak > 0);
   await ctl.client.request({ type: T.SUBSCRIBE, hz: 0 });
   const before = JSON.stringify(store.model.meters);

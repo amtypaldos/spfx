@@ -54,34 +54,44 @@ static void set_param(void *st, int i, float v)
 	s->dirty = 1;
 }
 
-static inline float wave01(int shape, float p)
-{
-	switch (shape) {
-	case 0: return 0.5f + 0.5f * fx_sin01(p);
-	case 1: return p < 0.5f ? 2.0f * p : 2.0f - 2.0f * p;
-	case 2: return p < 0.5f ? 1.0f : 0.0f;
-	default: return 1.0f - p;
+/* One loop per waveform (the shape switch is out of the per-sample path); state in locals. */
+#define TREM_LOOP(WAVE)                                                              \
+	for (int i = 0; i < n; i++) {                                                \
+		float p2 = ph + off;                                                 \
+		if (p2 >= 1.0f) p2 -= 1.0f;                                          \
+		float tl = 1.0f - dep * (1.0f - WAVE(ph));                           \
+		float tr = 1.0f - dep * (1.0f - WAVE(p2));                           \
+		g0 += sl * (tl - g0);                                                \
+		g1 += sl * (tr - g1);                                                \
+		l[i] *= g0;                                                          \
+		r[i] *= g1;                                                          \
+		ph += inc;                                                           \
+		if (ph >= 1.0f) ph -= 1.0f;                                          \
 	}
-}
+
+static inline float w_sine(float p) { return 0.5f + 0.5f * fx_sin01(p); }
+static inline float w_tri(float p) { return p < 0.5f ? 2.0f * p : 2.0f - 2.0f * p; }
+static inline float w_sq(float p) { return p < 0.5f ? 1.0f : 0.0f; }
+static inline float w_ramp(float p) { return 1.0f - p; }
 
 static void process(void *st, float *l, float *r, int n)
 {
 	trem_t *s = st;
 	if (s->dirty) update(s);
-	float ph = s->ph;
-	for (int i = 0; i < n; i++) {
-		float tl = 1.0f - s->depth * (1.0f - wave01(s->shape, ph));
-		float tr = 1.0f - s->depth * (1.0f - wave01(s->shape, fx_wrap01(ph + s->off)));
-		s->g[0] += s->slew * (tl - s->g[0]);
-		s->g[1] += s->slew * (tr - s->g[1]);
-		l[i] *= s->g[0];
-		r[i] *= s->g[1];
-		ph = fx_wrap01(ph + s->inc);
+	float ph = s->ph, g0 = s->g[0], g1 = s->g[1];
+	const float dep = s->depth, off = s->off, sl = s->slew, inc = s->inc;
+	switch (s->shape) {
+	case 0: TREM_LOOP(w_sine) break;
+	case 1: TREM_LOOP(w_tri) break;
+	case 2: TREM_LOOP(w_sq) break;
+	default: TREM_LOOP(w_ramp) break;
 	}
 	s->ph = ph;
+	s->g[0] = g0;
+	s->g[1] = g1;
 }
 
 const fx_desc fx_desc_tremolo = {
-	FX_TREMOLO, "Tremolo", 4, P, sizeof(trem_t), 0, 45, 0, FX_MIX_CROSSFADE, 1,
+	FX_TREMOLO, "Tremolo", 4, P, sizeof(trem_t), 0, 115, 0, FX_MIX_CROSSFADE, 1,
 	init, reset, set_param, process,
 };

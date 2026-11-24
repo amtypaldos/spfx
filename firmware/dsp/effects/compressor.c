@@ -1,4 +1,5 @@
-/* Feed-forward stereo-linked peak compressor with automatic make-up gain.
+/* Feed-forward stereo-linked peak compressor with automatic make-up gain. Detector and gain
+ * computer at 12 kHz (one per 4 frames, gain ramped in between).
  * Hard knee, no look-ahead (the engine's output limiter catches fast overshoots). */
 #include "../fx.h"
 #include "../util.h"
@@ -9,6 +10,7 @@ typedef struct {
 	int dirty;
 	float thr, slope, makeup_lin, ka, kr;
 	float gr; /* smoothed gain reduction, dB */
+	float g_last; /* linear gain at the end of the last group */
 } comp_t;
 
 static const fx_param_desc P[4] = {
@@ -32,7 +34,12 @@ static void update(comp_t *s)
 	s->dirty = 0;
 }
 
-static void reset(void *st) { ((comp_t *)st)->gr = 0.0f; }
+static void reset(void *st)
+{
+	comp_t *s = st;
+	s->gr = 0.0f;
+	s->g_last = s->makeup_lin;
+}
 
 static void init(void *st, void *mem, float sr)
 {
@@ -52,24 +59,44 @@ static void set_param(void *st, int i, float v)
 	s->dirty = 1;
 }
 
+/* The detector and gain computer run once per GRP frames (peak of the group, 12 kHz);
+ * the gain is ramped linearly across the group, so there are no steps. */
+#define GRP 4
+
 static void process(void *st, float *l, float *r, int n)
 {
 	comp_t *s = st;
 	if (s->dirty) update(s);
-	float gr = s->gr;
-	for (int i = 0; i < n; i++) {
-		float pk = fabsf(l[i]);
-		float pr = fabsf(r[i]);
-		if (pr > pk) pk = pr;
+	float gr = s->gr, g = s->g_last;
+	const float thr = s->thr, slope = s->slope, mk = s->makeup_lin;
+	/* per-group coefficients: 1 - (1 - k)^GRP */
+	float qa = 1.0f - s->ka, qr = 1.0f - s->kr;
+	qa *= qa; qa *= qa;
+	qr *= qr; qr *= qr;
+	const float ka = 1.0f - qa, kr = 1.0f - qr;
+	for (int i0 = 0; i0 < n; i0 += GRP) {
+		int m = n - i0 < GRP ? n - i0 : GRP;
+		float pk = 0.0f;
+		for (int i = i0; i < i0 + m; i++) {
+			float a = fabsf(l[i]), b = fabsf(r[i]);
+			if (a > pk) pk = a;
+			if (b > pk) pk = b;
+		}
 		float lvl_db = DB_PER_LOG2 * fx_log2(pk + 1e-9f);
-		float over = lvl_db - s->thr;
-		float target = over > 0.0f ? over * s->slope : 0.0f;
-		gr += (target > gr ? s->ka : s->kr) * (target - gr);
-		float g = fx_exp2(-gr * (1.0f / DB_PER_LOG2)) * s->makeup_lin;
-		l[i] *= g;
-		r[i] *= g;
+		float over = lvl_db - thr;
+		float target = over > 0.0f ? over * slope : 0.0f;
+		gr += (target > gr ? ka : kr) * (target - gr);
+		float gn = fx_exp2(-gr * (1.0f / DB_PER_LOG2)) * mk;
+		float dg = (gn - g) / (float)m;
+		for (int i = i0; i < i0 + m; i++) {
+			g += dg;
+			l[i] *= g;
+			r[i] *= g;
+		}
+		g = gn;
 	}
 	s->gr = fx_flush(gr);
+	s->g_last = g;
 }
 
 const fx_desc fx_desc_compressor = {

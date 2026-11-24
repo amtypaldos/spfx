@@ -123,13 +123,17 @@ static void test_admission_memory(void)
 
 static void test_admission_cpu(void)
 {
-	fresh(300);
-	CHECK(engine_assign(&eng, 0, FX_REVERB) == ENG_ERR_CPU); /* 320 > 300 */
+	/* declared: reverb 240, filter 130, tremolo 115, compressor 110 */
+	fresh(230);
+	CHECK(engine_assign(&eng, 0, FX_REVERB) == ENG_ERR_CPU); /* 240 > 230 */
 	CHECK(eng.cfg.fx_id[0] == FX_NONE);
 	CHECK(engine_assign(&eng, 0, FX_FILTER) == ENG_OK);
-	CHECK(engine_assign(&eng, 1, FX_SATURATION) == ENG_OK);
-	CHECK(engine_assign(&eng, 2, FX_COMPRESSOR) == ENG_OK);
-	CHECK(engine_assign(&eng, 3, FX_COMPRESSOR) == ENG_ERR_CPU);
+	CHECK(engine_assign(&eng, 1, FX_COMPRESSOR) == ENG_ERR_CPU); /* 240 > 230 */
+	fresh(355);
+	CHECK(engine_assign(&eng, 0, FX_REVERB) == ENG_OK);
+	CHECK(engine_assign(&eng, 1, FX_TREMOLO) == ENG_OK);      /* 355 = budget: admitted */
+	CHECK(engine_assign(&eng, 2, FX_COMPRESSOR) == ENG_ERR_CPU);
+	CHECK(engine_assign(&eng, 1, FX_COMPRESSOR) == ENG_OK);   /* replacing frees its own share */
 }
 
 static void test_blocks_never_overlap(void)

@@ -85,39 +85,60 @@ static void set_param(void *st, int i, float v)
 	s->dirty = 1;
 }
 
+/* LFO evaluated every SUB samples, delay ramped linearly in between (chorus <= 5 Hz,
+ * flanger <= 10 Hz: the deviation from the per-sample curve stays below 0.02 samples). */
+#define SUB 16
+
+static inline float md_delay(const md_t *s, float ph, float maxd)
+{
+	float d = s->base + s->depth * fx_sin01(ph);
+	return d < 2.0f ? 2.0f : (d > maxd ? maxd : d);
+}
+
 static void process(void *st, float *l, float *r, int n)
 {
 	md_t *s = st;
 	if (s->dirty) update(s);
 	float ph = s->phase;
-	float fb = s->fb;
-	float maxd = (float)(MD_SAMPLES - 3);
-	for (int i = 0; i < n; i++) {
-		float lfo_l = fx_sin01(ph);
-		float lfo_r = fx_sin01(fx_wrap01(ph + s->phase_off));
-		float dl = s->base + s->depth * lfo_l;
-		float dr = s->base + s->depth * lfo_r;
-		if (dl < 2.0f) dl = 2.0f;
-		if (dr < 2.0f) dr = 2.0f;
-		if (dl > maxd) dl = maxd;
-		if (dr > maxd) dr = maxd;
-		float yl = fx_dl_read(&s->dl[0], dl);
-		float yr = fx_dl_read(&s->dl[1], dr);
-		fx_dl_write(&s->dl[0], l[i] + fb * yl);
-		fx_dl_write(&s->dl[1], r[i] + fb * yr);
-		l[i] = yl;
-		r[i] = yr;
-		ph = fx_wrap01(ph + s->inc);
+	const float fb = s->fb, inc = s->inc, off = s->phase_off;
+	const float maxd = (float)(MD_SAMPLES - 3);
+	int16_t *const bl = s->dl[0].buf, *const br = s->dl[1].buf;
+	const uint32_t size = s->dl[0].size;
+	uint32_t w = s->dl[0].w;
+	float dl = md_delay(s, ph, maxd), dr = md_delay(s, fx_wrap01(ph + off), maxd);
+	for (int i0 = 0; i0 < n; i0 += SUB) {
+		int m = n - i0 < SUB ? n - i0 : SUB;
+		float ph_end = ph + inc * (float)m;
+		if (ph_end >= 1.0f) ph_end -= 1.0f;
+		float dl_end = md_delay(s, ph_end, maxd);
+		float dr_end = md_delay(s, fx_wrap01(ph_end + off), maxd);
+		float sl = (dl_end - dl) / (float)m, sr = (dr_end - dr) / (float)m;
+		for (int i = i0; i < i0 + m; i++) {
+			float yl = fx_dl_read_at(bl, size, w, dl);
+			float yr = fx_dl_read_at(br, size, w, dr);
+			bl[w] = fx_dl_q(l[i] + fb * yl);
+			br[w] = fx_dl_q(r[i] + fb * yr);
+			if (++w >= size) w = 0;
+			l[i] = yl;
+			r[i] = yr;
+			dl += sl;
+			dr += sr;
+		}
+		ph = ph_end;
+		dl = dl_end; /* no drift from the summed steps */
+		dr = dr_end;
 	}
+	s->dl[0].w = w;
+	s->dl[1].w = w;
 	s->phase = ph;
 }
 
 const fx_desc fx_desc_chorus = {
-	FX_CHORUS, "Chorus", 4, PC, sizeof(md_t), MD_SAMPLES * 2 * sizeof(int16_t), 120, 100,
+	FX_CHORUS, "Chorus", 4, PC, sizeof(md_t), MD_SAMPLES * 2 * sizeof(int16_t), 200, 100,
 	FX_MIX_CROSSFADE, 1, init_c, reset, set_param, process,
 };
 
 const fx_desc fx_desc_flanger = {
-	FX_FLANGER, "Flanger", 4, PF, sizeof(md_t), MD_SAMPLES * 2 * sizeof(int16_t), 120, 500,
+	FX_FLANGER, "Flanger", 4, PF, sizeof(md_t), MD_SAMPLES * 2 * sizeof(int16_t), 200, 500,
 	FX_MIX_CROSSFADE, 1, init_f, reset, set_param, process,
 };

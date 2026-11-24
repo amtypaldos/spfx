@@ -73,28 +73,39 @@ static void process(void *st, float *l, float *r, int n)
 	float dg = s->drive_cur;
 	int use_drive = dg > 1.001f;
 	float comp = use_drive ? 1.0f / sqrtf(dg) : 1.0f;
-	int type = s->type;
+	/* output = c0*v0 + c1*v1 + c2*v2 for every mode (no per-sample switch) */
+	float c0, c1, c2;
+	switch (s->type) {
+	case 0: c0 = 0.0f; c1 = 0.0f; c2 = 1.0f; break; /* low-pass */
+	case 1: c0 = 1.0f; c1 = -k; c2 = -1.0f; break;  /* high-pass */
+	case 2: c0 = 0.0f; c1 = k; c2 = 0.0f; break;    /* band-pass */
+	default: c0 = 1.0f; c1 = -k; c2 = 0.0f; break;  /* notch */
+	}
 	float *ch[2] = {l, r};
 
 	for (int c = 0; c < 2; c++) {
 		float ic1 = s->ic1[c], ic2 = s->ic2[c];
 		float *x = ch[c];
-		for (int i = 0; i < n; i++) {
-			float v0 = x[i];
-			if (use_drive) v0 = fx_tanh(v0 * dg) * comp;
-			float v3 = v0 - ic2;
-			float v1 = a1 * ic1 + a2 * v3;
-			float v2 = ic2 + a2 * ic1 + a3 * v3;
-			ic1 = 2.0f * v1 - ic1;
-			ic2 = 2.0f * v2 - ic2;
-			float y;
-			switch (type) {
-			case 0: y = v2; break;
-			case 1: y = v0 - k * v1 - v2; break;
-			case 2: y = k * v1; break;
-			default: y = v0 - k * v1; break;
+		if (use_drive) {
+			for (int i = 0; i < n; i++) {
+				float v0 = fx_softclip(x[i] * dg) * comp;
+				float v3 = v0 - ic2;
+				float v1 = a1 * ic1 + a2 * v3;
+				float v2 = ic2 + a2 * ic1 + a3 * v3;
+				ic1 = 2.0f * v1 - ic1;
+				ic2 = 2.0f * v2 - ic2;
+				x[i] = c0 * v0 + c1 * v1 + c2 * v2;
 			}
-			x[i] = y;
+		} else {
+			for (int i = 0; i < n; i++) {
+				float v0 = x[i];
+				float v3 = v0 - ic2;
+				float v1 = a1 * ic1 + a2 * v3;
+				float v2 = ic2 + a2 * ic1 + a3 * v3;
+				ic1 = 2.0f * v1 - ic1;
+				ic2 = 2.0f * v2 - ic2;
+				x[i] = c0 * v0 + c1 * v1 + c2 * v2;
+			}
 		}
 		s->ic1[c] = fx_flush(ic1);
 		s->ic2[c] = fx_flush(ic2);
@@ -102,6 +113,6 @@ static void process(void *st, float *l, float *r, int n)
 }
 
 const fx_desc fx_desc_filter = {
-	FX_FILTER, "Filter", 4, P, sizeof(filter_t), 0, 70, 0, FX_MIX_CROSSFADE, 1,
+	FX_FILTER, "Filter", 4, P, sizeof(filter_t), 0, 130, 0, FX_MIX_CROSSFADE, 1,
 	init, reset, set_param, process,
 };

@@ -5,11 +5,35 @@ Status: **built, never run on hardware.** Everything below about behaviour is
 
 | Image | File in `~/spfx/flash-ready/` | App dir | USB product / PID |
 |---|---|---|---|
-| A | `sp1fx-usbaudio-in-v2.bin` (v1: `sp1fx-usbaudio-in.bin`, crashes, see below) | `firmware/app/zephyr_usbaudio` | `SP-1 FX`, 0x2fe3:0x0101 |
+| A | **`sp1fx-usbaudio-in-v3.bin`** (optimised DSP + overload guard, see "v3" below); v2: `sp1fx-usbaudio-in-v2.bin` (overloads on every effect preset, measured); v1: `sp1fx-usbaudio-in.bin` (crashes) | `firmware/app/zephyr_usbaudio` | `SP-1 FX`, 0x2fe3:0x0101 |
 | B | `sp1fx-usbaudio-io-v2.bin` (v1: `sp1fx-usbaudio-io.bin`) | `firmware/app/zephyr_usbaudio_io` (same sources) | `SP-1 FX IO`, 0x2fe3:0x0102 |
 
 SHA-256: v2 in `~/spfx/flash-ready/SHA256SUMS.usbaudio2`, v1 in `SHA256SUMS.usbaudio`.
 (VID 0x2fe3 is Zephyr's development VID; for bring-up only.)
+
+## v3 (`sp1fx-usbaudio-in-v3.bin`): optimised DSP + runtime overload guard
+
+**Measured on v2 (owner, console):** Clean ~138 cycles/frame, every effect preset
+2,270-2,430 cycles/frame (170-200 % CPU) -> static. Cause and fixes: docs/STATUS.md
+("CPU: why effects were ~4x the declared cost"). v3 = same app with the optimised DSP
+(simulated: Dub Station ~1710 -> ~673 cycles/frame in the instruction-count model, so
+roughly 900-1000 on the device; NOT measured) and an **overload guard**: if a block's work
+(`blk` cycles, incl. conversions and interrupts) exceeds 85 % of the 1.333 ms block period
+(72,533 cycles) for 8 blocks in a row (~11 ms; blocks that initialise an effect are
+ignored), the audio thread fades out (one block) and switches off the live slot with the
+largest declared cost; if every slot is off and it is still overloaded it forces global
+bypass (dry signal). The console prints one line per action:
+
+```
+OVERLOAD guard: shed_mask=0x8 (slots off: 3) forced_bypass=0 sheds=1 over_blocks=9 limit=72533 cyc/blk preset=1:Dub Station
+```
+and the `diag` line ends with `ovl shed=0x.. forced=. over_blk=..`. A preset change (FUNCTION
+tap) clears the guard. Test steps for v3: as for v2 below ("Retest steps"), with
+`sp1fx-usbaudio-in-v3.bin`; additionally report every `OVERLOAD` line (there should be
+none) and the `cyc_frame_avg/max` per preset. Run `sp1fx-fxprof.bin`
+(docs/BRINGUP_FXPROF.md) first if possible: it measures each effect alone.
+
+The image B (`zephyr_usbaudio_io`) builds with the same changes but was not published as v3.
 
 ## Known issue found on hardware (v1): crash on the first preset change
 

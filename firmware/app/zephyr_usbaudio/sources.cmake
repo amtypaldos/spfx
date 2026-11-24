@@ -20,6 +20,12 @@ set(SP1FX_DSP_SRC
   ${SP1FX_FW}/dsp/effects/tremolo.c
 )
 
+# The firmware links the toolchain's size-optimised picolibc, whose memcpy/memset copy one
+# byte per iteration (~5 cycles/byte on the M4). Keep GCC from turning the DSP's copy / clear
+# loops into calls to them (dsp/util.h fx_copy32 / fx_zero32).
+set_source_files_properties(${SP1FX_DSP_SRC} ${SP1FX_UA_DIR}/src/main.c ${SP1FX_FW}/audio/usb_audio_core.c
+  PROPERTIES COMPILE_OPTIONS "-fno-tree-loop-distribute-patterns")
+
 target_sources(app PRIVATE
   ${SP1FX_UA_DIR}/src/main.c
   # hardware-verified codec code of the tone image, shared, not copied

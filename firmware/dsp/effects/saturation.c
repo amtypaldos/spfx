@@ -1,4 +1,4 @@
-/* Waveshaping saturation: drive -> biased tanh -> DC blocker -> tone (LP) -> output gain.
+/* Waveshaping saturation: drive -> biased cubic soft clip (fx_softclip) -> DC blocker -> tone (LP) -> output gain.
  * No oversampling (aliasing at high drive is a known, documented trade-off). */
 #include "../fx.h"
 #include "../util.h"
@@ -70,7 +70,7 @@ static void process(void *st, float *l, float *r, int n)
 	float dg = (s->g_cur - g0) / (float)n;
 	float dc = (s->comp_cur - c0) / (float)n;
 	float dout = (s->out_cur - o0) / (float)n;
-	float b = s->bias, tb = fx_tanh(b), a = s->tone_a;
+	float b = s->bias, tb = fx_softclip(b), a = s->tone_a;
 	float *ch[2] = {l, r};
 
 	for (int c = 0; c < 2; c++) {
@@ -79,7 +79,7 @@ static void process(void *st, float *l, float *r, int n)
 		float *x = ch[c];
 		for (int i = 0; i < n; i++) {
 			g += dg; cp += dc; o += dout;
-			float y = fx_tanh(x[i] * g + b) - tb;
+			float y = fx_softclip(x[i] * g + b) - tb;
 			float d = y - x1 + 0.9987f * y1; /* DC blocker */
 			x1 = y;
 			y1 = d;
@@ -93,6 +93,6 @@ static void process(void *st, float *l, float *r, int n)
 }
 
 const fx_desc fx_desc_saturation = {
-	FX_SATURATION, "Saturation", 4, P, sizeof(sat_t), 0, 90, 0, FX_MIX_CROSSFADE, 1,
+	FX_SATURATION, "Saturation", 4, P, sizeof(sat_t), 0, 115, 0, FX_MIX_CROSSFADE, 1,
 	init, reset, set_param, process,
 };

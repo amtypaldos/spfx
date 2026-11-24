@@ -80,6 +80,12 @@ typedef struct {
 	uint32_t init_bytes_max;       /* most effect memory initialised in one chunk */
 	uint32_t torn_retries;         /* mailbox copies discarded because of a concurrent post */
 	uint32_t layout_errors;        /* snapshot slots refused by the audio-side check (must stay 0) */
+	/* audio thread: overload guard (engine_overload_feed) */
+	uint32_t overload_blocks;      /* blocks reported over the limit (total) */
+	uint32_t overload_sheds;       /* slots switched off by the guard (total) */
+	uint32_t overload_forced;      /* times the guard forced global bypass */
+	uint8_t shed_mask;             /* bit s = slot s is switched off by the guard now */
+	uint8_t forced_bypass;         /* 1 = guard forced global bypass now */
 } engine_diag_t;
 
 /* One complete config snapshot as handed to the audio thread. */
@@ -131,17 +137,30 @@ struct engine_s {
 	uint32_t tail_rem[ENGINE_SLOTS];
 	uint8_t active[ENGINE_SLOTS];
 	float ingain_cur, master_cur;
+	float ig_db_cached, ig_t_cached, mg_cached, mg_t_cached; /* per-block gain targets */
+	/* overload guard (audio half): 0 = running, 1 = fading out this chunk, 2 = off */
+	uint8_t shed[ENGINE_SLOTS];
+	uint8_t forced_bypass;         /* every slot off (tails too), dry signal only */
+	uint8_t chunk_inits;           /* an effect init ran in the last chunk */
+	uint32_t over_run;             /* consecutive blocks over the limit */
+	uint32_t shed_clear_ack;
 	float k_mix, k_in, k_gain, k_master, k_duck;
 	float duck_cur;
 
 	/* ---- shared single-word fields */
 	volatile uint8_t duck;         /* control: 1 = fade output to silence (~20 ms), 0 = back */
 	volatile uint32_t ack_post;    /* audio: newest post whose effects are all initialised */
+	volatile uint32_t shed_clear_req; /* control: ++ to undo the overload guard's actions */
 
 	/* Max effect memory (bytes) initialised per chunk; 0 = unlimited (all pending inits run
 	 * at the start of the next chunk). At least one init always runs per chunk, so a delay
 	 * (75 KB) still starts with a budget below its size. Set before the audio thread runs. */
 	uint32_t init_budget;
+
+	/* Overload guard: this many consecutive blocks over the limit trigger one action
+	 * (engine_overload_feed). Set before the audio thread runs; engine_init sets
+	 * ENGINE_OVERLOAD_BLOCKS, 0 disables the guard. */
+	uint32_t overload_n;
 
 	/* Tests only (NULL in firmware): called at the ENGINE_HOOK_* points. */
 	void (*hook)(engine_t *e, int point, void *ctx);
@@ -150,7 +169,13 @@ struct engine_s {
 	engine_diag_t diag;
 };
 
+/* Admission budget for the sum of the effects' DECLARED cpu_cycles (cycles per stereo frame).
+ * The M4F has 64e6/48e3 = 1333 cycles per frame; the engine's own fixed cost, the USB/I2S
+ * interrupts and the int16<->float conversions take part of it (docs/STATUS.md). The declared
+ * per-effect values are UNMEASURED estimates (static analysis + instruction-count emulation),
+ * so the runtime overload guard below is the safety net, not this number. */
 #define ENGINE_DEFAULT_CPU_BUDGET 850u
+#define ENGINE_OVERLOAD_BLOCKS 8u
 
 void engine_config_default(engine_config_t *c);
 /* Repair a config of unknown provenance (corrupt flash, bad import). Returns number of fixes. */
@@ -184,6 +209,16 @@ void engine_resources(const engine_t *e, uint32_t *mem_used, uint32_t *cpu_used)
 
 /* Audio: process n frames (any n). in and out may alias. */
 void engine_process(engine_t *e, const float *in_l, const float *in_r, float *out_l, float *out_r, int n);
+/* Audio: overload guard. Call once after every engine_process() block with the cycles that
+ * block's work took and the limit (e.g. 85 % of the block period). After overload_n
+ * consecutive blocks over the limit (blocks that initialised an effect are ignored) the guard
+ * fades out and switches off the live slot with the largest declared cpu_cycles (diag.shed_mask);
+ * when no slot is left it forces global bypass (diag.forced_bypass). Returns 1 when it acted
+ * on this call. The actions last until the slot gets a new effect, or engine_overload_clear(). */
+int engine_overload_feed(engine_t *e, uint32_t cycles, uint32_t limit);
+/* Control: undo the guard's actions (taken at the audio thread's next chunk). */
+void engine_overload_clear(engine_t *e);
+
 /* Audio (or single-threaded host): take a pending snapshot and run ALL pending inits now,
  * ignoring init_budget, without processing audio. */
 void engine_pump(engine_t *e);

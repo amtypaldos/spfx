@@ -32,6 +32,16 @@ uint32_t ua_ring_fill(const ua_ring_t *r)
 
 uint32_t ua_ring_space(const ua_ring_t *r) { return r->cap - ua_ring_fill(r); }
 
+/* Frame copy (L, R int16 pairs). Not memcpy: the firmware's libc memcpy moves one byte per
+ * loop iteration; this file is compiled with -fno-tree-loop-distribute-patterns there. */
+static void copy_frames(int16_t *d, const int16_t *s, uint32_t n)
+{
+	for (uint32_t i = 0; i < n; i++) {
+		d[2u * i] = s[2u * i];
+		d[2u * i + 1u] = s[2u * i + 1u];
+	}
+}
+
 uint32_t ua_ring_write(ua_ring_t *r, const int16_t *frames, uint32_t n)
 {
 	uint32_t h = r->head;
@@ -40,8 +50,8 @@ uint32_t ua_ring_write(ua_ring_t *r, const int16_t *frames, uint32_t n)
 	uint32_t i0 = h & (r->cap - 1u);
 	uint32_t first = r->cap - i0;
 	if (first > n) first = n;
-	memcpy(&r->buf[2u * i0], frames, (size_t)first * 2u * sizeof(int16_t));
-	if (n > first) memcpy(&r->buf[0], &frames[2u * first], (size_t)(n - first) * 2u * sizeof(int16_t));
+	copy_frames(&r->buf[2u * i0], frames, first);
+	if (n > first) copy_frames(&r->buf[0], &frames[2u * first], n - first);
 	UA_BARRIER();
 	r->head = h + n;
 	return n;
@@ -57,8 +67,8 @@ uint32_t ua_ring_read(ua_ring_t *r, int16_t *out, uint32_t n)
 		uint32_t i0 = t & (r->cap - 1u);
 		uint32_t first = r->cap - i0;
 		if (first > n) first = n;
-		memcpy(out, &r->buf[2u * i0], (size_t)first * 2u * sizeof(int16_t));
-		if (n > first) memcpy(&out[2u * first], &r->buf[0], (size_t)(n - first) * 2u * sizeof(int16_t));
+		copy_frames(out, &r->buf[2u * i0], first);
+		if (n > first) copy_frames(&out[2u * first], &r->buf[0], n - first);
 	}
 	UA_BARRIER();
 	r->tail = t + n;

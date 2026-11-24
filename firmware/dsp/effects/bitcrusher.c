@@ -61,18 +61,18 @@ static void process(void *st, float *l, float *r, int n)
 	bc_t *s = st;
 	if (s->dirty) update(s);
 	float *ch[2] = {l, r};
-	float L = s->levels, iL = 1.0f / s->levels;
+	const float L = s->levels, iL = 1.0f / s->levels, ratio = s->ratio, ta = s->tone_a, out = s->out;
 	for (int c = 0; c < 2; c++) {
 		float ph = s->ph[c], hold = s->hold[c], lp = s->lp[c];
 		float *x = ch[c];
 		for (int i = 0; i < n; i++) {
-			ph += s->ratio;
+			ph += ratio;
 			if (ph >= 1.0f) {
 				ph -= 1.0f;
-				hold = floorf(fx_clamp(x[i], -1.0f, 1.0f) * L + 0.5f) * iL;
+				hold = (float)fx_floori(fx_clamp(x[i], -1.0f, 1.0f) * L + 0.5f) * iL;
 			}
-			lp += s->tone_a * (hold - lp);
-			x[i] = lp * s->out;
+			lp += ta * (hold - lp);
+			x[i] = lp * out;
 		}
 		s->ph[c] = ph;
 		s->hold[c] = hold;
@@ -81,6 +81,6 @@ static void process(void *st, float *l, float *r, int n)
 }
 
 const fx_desc fx_desc_bitcrusher = {
-	FX_BITCRUSHER, "Bitcrusher", 4, P, sizeof(bc_t), 0, 40, 0, FX_MIX_CROSSFADE, 1,
+	FX_BITCRUSHER, "Bitcrusher", 4, P, sizeof(bc_t), 0, 125, 0, FX_MIX_CROSSFADE, 1,
 	init, reset, set_param, process,
 };

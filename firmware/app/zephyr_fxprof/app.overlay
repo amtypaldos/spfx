@@ -1,0 +1,19 @@
+/*
+ * SP-1 FX fxprof overlay on the stem_player board: USB CDC console only.
+ * No audio (UAC2, I2S, I2C off); codec reset lines held asserted -> silent.
+ * Pins as the usbaudio image (firmware/app/zephyr_usbaudio/app.overlay).
+ */
+
+&zephyr_user {
+	heartbeat-led-gpios = <&gpio0 29 GPIO_ACTIVE_HIGH>;   /* LED 1 */
+	busy-led-gpios      = <&gpio0 26 GPIO_ACTIVE_HIGH>;   /* LED 2: on while a case is timed */
+	fn-gpios            = <&gpio0 27 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+	osc-en-gpios        = <&gpio0 13 GPIO_ACTIVE_HIGH>;
+	cs42-rst-gpios      = <&gpio0 15 GPIO_ACTIVE_LOW>;
+	tas-rst-gpios       = <&gpio0 9 GPIO_ACTIVE_LOW>;
+};
+
+&uac2_speaker { status = "disabled"; };
+&i2s0 { status = "disabled"; };
+&i2c0 { status = "disabled"; };
+&adc  { status = "disabled"; };
