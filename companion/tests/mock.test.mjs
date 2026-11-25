@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { MockDevice, createLoopback, mulberry32 } from '../js/mock-device.js';
 import { Client, Coalescer, RequestTimeout } from '../js/client.js';
 import { Controller } from '../js/controller.js';
-import { Store } from '../js/state.js';
-import { T, RESULT } from '../js/protocol.js';
+import { Store, createModel, unsupported, hasCap } from '../js/state.js';
+import { T, RESULT, CAP, CAPS_RC6 } from '../js/protocol.js';
 import { FACTORY_PRESETS } from '../js/presets.js';
 import { fxTable, tick } from './helpers.mjs';
 
@@ -251,4 +251,42 @@ test('sync clock switch: host sets it, device state reports it, no echo', async 
   assert.equal(store.model.syncOn, true, 'STATE carries the saved sync flag');
   await ctl.setSync(false);
   assert.equal(dev.s.syncOn, false);
+});
+
+test('caps: a device without some features grays out exactly those (2026.11.25)', async () => {
+  const dev = new MockDevice(fxTable, { rng: mulberry32(1), caps: CAP.OUT_LINE | CAP.SAVE });
+  const store = new Store();
+  const ctl = new Controller(store, fxTable, { paceMs: 0, rateMs: 1 });
+  await ctl.connect(createLoopback(dev), 'demo');
+  const m = store.model;
+  assert.equal(m.caps, 0x12);
+  assert.ok(hasCap(m, CAP.OUT_LINE) && !hasCap(m, CAP.SYNC));
+  const u = unsupported(m);
+  for (const id of ['gSync', 'outMode:2', 'battery']) assert.ok(u.includes(id), id);
+  assert.ok(!u.includes('outMode:1') && !u.includes('save'));
+  // the device refuses an undeclared level; the companion reports it and re-syncs
+  await ctl.setOutputMode(2); await settle(10);
+  assert.equal(store.model.outMode, 0);
+  await ctl.disconnect();
+});
+
+test('caps: rc6-style device (no caps field) and the demo default enable everything', () => {
+  const m = createModel();
+  assert.equal(m.caps, CAPS_RC6);
+  assert.deepEqual(unsupported(m), []);
+  assert.deepEqual(unsupported({ ...m, caps: 0xFFFFFFFF }), []);
+});
+
+test('caps: saveNow without the SAVE cap does not send and explains why', async () => {
+  const dev = new MockDevice(fxTable, { rng: mulberry32(1), caps: CAPS_RC6 & ~CAP.SAVE });
+  const store = new Store();
+  const ctl = new Controller(store, fxTable, { paceMs: 0, rateMs: 1 });
+  const notices = []; ctl.onNotice((n) => notices.push(n));
+  await ctl.connect(createLoopback(dev), 'demo');
+  const seen = []; const orig = dev._handle.bind(dev);
+  dev._handle = (m, seq) => { seen.push(m.type); return orig(m, seq); };
+  await ctl.saveNow(); await settle();
+  assert.ok(!seen.includes(T.SAVE_NOW));
+  assert.ok(notices.some((n) => /newer firmware/.test(n.text ?? n.msg ?? String(n))));
+  await ctl.disconnect();
 });

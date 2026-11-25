@@ -1,12 +1,12 @@
 // Application model + tiny store. No DOM dependencies.
-import { T } from './protocol.js';
+import { T, CAP, CAPS_RC6 } from './protocol.js';
 import { defaultNorm, SLOT_COUNT } from './fx.js';
 
 export function createModel() {
   return {
     conn: 'disconnected',          // disconnected | connecting | connected
     mode: null,                    // 'serial' | 'demo' | null
-    fw: '', proto: 0, sampleRate: 0, block: 0,
+    fw: '', proto: 0, sampleRate: 0, block: 0, caps: CAPS_RC6,
     poolBytes: 0, cpuBudget: 0,
     fxTable: [],
     synced: false,                 // true once a STATE has been received
@@ -16,6 +16,21 @@ export function createModel() {
     uiMode: 0, editSlot: 0,
     meters: { inPeak: 0, outPeak: 0, cpuPct: 0, cpuPeakPct: 0, memUsed: 0, inClips: 0, outClips: 0, underruns: 0, overruns: 0, nanEvents: 0 },
   };
+}
+
+/** True when the connected firmware declares the feature (HELLO_RSP caps, PROTOCOL.md). */
+export function hasCap(m, bit) { return ((m.caps >>> 0) & bit) !== 0; }
+
+/** Controls the connected firmware does not support, for graying out:
+ *  element ids, 'outMode:<value>' for level options, 'battery', 'save'. */
+export function unsupported(m) {
+  const u = [];
+  if (!hasCap(m, CAP.SYNC)) u.push('gSync');
+  if (!hasCap(m, CAP.OUT_LINE)) u.push('outMode:1');
+  if (!hasCap(m, CAP.OUT_LOUD)) u.push('outMode:2');
+  if (!hasCap(m, CAP.BATTERY)) u.push('battery');
+  if (!hasCap(m, CAP.SAVE)) u.push('save');
+  return u;
 }
 
 /** Make per-slot, per-effect remembered params (norm) from defaults. */

@@ -57,6 +57,7 @@ h2{font-size:21px;font-weight:620;letter-spacing:-.65px;margin:0 0 14px}
 h3{font-size:18px;font-weight:620;letter-spacing:-.4px;margin:0 0 10px}
 .eyebrow{text-transform:uppercase;letter-spacing:1.9px;font-size:12px;font-weight:650;color:var(--faint);margin:0 0 10px}
 .hint,footer{font-size:14px;line-height:1.65;color:var(--muted)}
+.hint.caps{grid-column:1/-1;margin:0;border-left:3px solid var(--warn);padding-left:10px}
 .lead{max-width:62ch;margin:0 0 10px}
 .card{background:var(--card);border:1px solid var(--card-edge);border-radius:24px;padding:24px;box-shadow:var(--card-shadow);min-width:0}
 .stack{display:grid;gap:16px;margin:16px 0}

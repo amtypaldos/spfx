@@ -1,7 +1,7 @@
 // Controller: connects store <-> protocol client. No DOM dependencies (testable in Node).
-import { T, RESULT, FACTORY_RESET_CONFIRM } from './protocol.js';
+import { T, RESULT, FACTORY_RESET_CONFIRM, CAP } from './protocol.js';
 import { Client, Coalescer, RequestTimeout } from './client.js';
-import { applyState, applySetter, applyMeters, createModel, defaultParams } from './state.js';
+import { applyState, applySetter, applyMeters, createModel, defaultParams, hasCap } from './state.js';
 import { fxFromDesc, fxKey, SLOT_COUNT } from './fx.js';
 
 const METER_HZ = 10;
@@ -50,7 +50,7 @@ export class Controller {
         table.push(fxFromDesc(d));
       }
       this.store.update((m) => {
-        m.fw = hello.fw; m.proto = hello.proto; m.sampleRate = hello.sampleRate; m.block = hello.block;
+        m.fw = hello.fw; m.proto = hello.proto; m.sampleRate = hello.sampleRate; m.block = hello.block; m.caps = hello.caps;
         m.poolBytes = hello.poolBytes; m.cpuBudget = hello.cpuBudget; m.fxTable = table;
       });
       await this.refreshState();
@@ -169,6 +169,7 @@ export class Controller {
 
   async saveNow() {
     if (!this.client) return;
+    if (!hasCap(this.model, CAP.SAVE)) { this.notice('error', `Saving on the device needs newer firmware (this device: ${this.model.fw || '?'}).`); return; }
     const c = await this._send({ type: T.SAVE_NOW });
     this.notice(c === RESULT.OK ? 'info' : 'error', c === RESULT.OK ? 'Saved on the device.' : 'The device did not confirm the save.');
   }

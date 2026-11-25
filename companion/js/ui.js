@@ -1,6 +1,8 @@
 // DOM layer. All user/preset/device strings go through textContent / setAttribute, never innerHTML.
 import { normToValue, valueToNorm, formatValue, defaultNorm, stepLabels, POOL_BYTES, CPU_BUDGET } from './fx.js';
 import { presetAdmission, cleanName } from './presets.js';
+import { unsupported, hasCap } from './state.js';
+import { CAP } from './protocol.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
@@ -240,7 +242,7 @@ export function mountUI({ store, ctl, library, env }) {
     const live = m.synced;
     const dash = '—';
     $('tFw').textContent = live ? (m.fw || dash) : dash;
-    const bp = Number.isInteger(m.meters.battPct) ? ` · battery ~${m.meters.battPct} %` : '';
+    const bp = !hasCap(m, CAP.BATTERY) ? ' · battery n/a' : Number.isInteger(m.meters.battPct) ? ` · battery ~${m.meters.battPct} %` : '';
     const pwr = (m.meters.charging ? ' · charging' : m.meters.usbPower ? ' · USB power' : '') + bp;
     $('tFwSub').textContent = live ? `protocol v${m.proto}${m.mode === 'demo' ? ' · simulated' : ''}${pwr}` : 'protocol —';
     const q = m.meters;
@@ -280,6 +282,20 @@ export function mountUI({ store, ctl, library, env }) {
       el.disabled = !m.synced;
     }
     if (!m.synced) for (const ui of slotUI) ui.reset.disabled = true;
+    // features the connected firmware does not declare (HELLO_RSP caps): grayed out, not hidden
+    const u = m.synced ? unsupported(m) : [];
+    const need = 'Needs newer firmware';
+    const gs = $('gSync');
+    if (u.includes('gSync')) gs.disabled = true;
+    gs.title = u.includes('gSync') ? need : '';
+    for (const o of $('outMode').options) {
+      const off = u.includes(`outMode:${o.value}`);
+      o.disabled = off; o.title = off ? need : '';
+    }
+    const visible = u.filter((x) => x !== 'save');
+    const hint = $('capsHint');
+    hint.hidden = visible.length === 0;
+    hint.textContent = visible.length ? `Grayed-out controls need newer firmware (this device: ${m.fw || '?'}).` : '';
   }
 
   function render(m) {
