@@ -10,6 +10,17 @@ project(sp1fx_zephyr_sp1fx LANGUAGES C)
 get_filename_component(SP1FX_FW ${CMAKE_CURRENT_LIST_DIR}/../.. ABSOLUTE)
 set(SP1FX_APP_DIR ${CMAKE_CURRENT_LIST_DIR})
 
+# Keep build-machine paths out of the image and its debug info (published .elf files):
+# repo -> ".", west workspace -> "zephyr-ws", SDK -> "zephyr-sdk". The three prefixes are disjoint.
+get_filename_component(SP1FX_REPO ${SP1FX_FW}/.. ABSOLUTE)
+get_filename_component(SP1FX_WS $ENV{ZEPHYR_BASE}/.. ABSOLUTE)
+zephyr_compile_options(-ffile-prefix-map=${SP1FX_REPO}=. -ffile-prefix-map=${SP1FX_WS}=zephyr-ws)
+zephyr_compile_options($<$<COMPILE_LANGUAGE:ASM>:-Wa,--debug-prefix-map=${SP1FX_WS}=zephyr-ws>
+  $<$<COMPILE_LANGUAGE:ASM>:-Wa,--debug-prefix-map=${SP1FX_REPO}=.>)
+if(DEFINED ENV{ZEPHYR_SDK_INSTALL_DIR})
+  zephyr_compile_options(-ffile-prefix-map=$ENV{ZEPHYR_SDK_INSTALL_DIR}=zephyr-sdk)
+endif()
+
 include(${ZEPHYR_BASE}/samples/subsys/usb/common/common.cmake)
 
 # Explicit, sorted lists (no GLOB) so the link order never depends on the host.

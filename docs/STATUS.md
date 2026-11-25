@@ -2,7 +2,27 @@
 
 Evidence key: **[HW]** observed on the owner's SP-1 (owner-run; see the hardware log). **[HOST]** verified by automated tests on a development Mac. **[SRC]** from upstream source/docs or our own build output. **[UNTESTED]** built but never run. **[TODO]** not started. The integrated image v1-rc1 has **not** been run on an SP-1.
 
-## v1-rc6 (2026-11-24) -- NOT RUN ON HARDWARE
+## 2026.11.25 -- NOT RUN ON HARDWARE
+
+`sp1fx-2026.11.25.bin`, SHA-256 `74656b23c8982a4955c55b2e6af9d747599f4f46358577a39c6f57ab11fa0214`,
+153,644 B, check PASS, reproducible, 0 warnings; host suites pass, companion 62/62.
+
+**Version scheme change:** from this image on, releases are named by date, `YYYY.MM.DD` (`.2`, `.3` for a
+second or third release on the same day). The firmware string is `sp1fx-2026.11.25`, the git tag `v2026.11.25`.
+"Not run on hardware" is shown by the GitHub pre-release flag and this label. `v1-rc1`..`v1-rc6` are the earlier names.
+
+= rc6 plus:
+- **Feature list in HELLO_RSP** (`caps u32`, `docs/PROTOCOL.md`) [HOST]. This image declares SYNC, OUT_LINE,
+  OUT_LOUD, BATTERY, SAVE and POWER_FLAGS. SET_OUTPUT_MODE refuses a mode whose bit is clear (no change here,
+  since both are declared).
+- **Companion** [HOST, headless Chrome with a reduced-feature demo device]:
+  - grays out controls the firmware doesn't declare, with a "needs newer firmware" note;
+  - ignores unknown trailing bytes from the device, so later firmware no longer breaks it;
+  - with rc6 (no caps field), it assumes the rc6 feature set. Not run against a real SP-1.
+- **Build:** `-ffile-prefix-map` / assembler `--debug-prefix-map` keep build-machine paths out of the ELF
+  (0 left, from ~1,275 in rc6). No change to the audio path or controls.
+
+## v1-rc6 (2026-11-24) -- superseded by 2026.11.25 (not run on hardware)
 
 `sp1fx-v1-rc6.bin`, SHA-256 `daabe9b3961c0b30d38230891b71ae7db819ff83cb3924093f0fa181b2a51597`,
 153,592 B, check PASS, reproducible, 0 warnings; host suites pass, companion 56/56.

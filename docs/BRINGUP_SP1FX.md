@@ -1,4 +1,17 @@
-# SP-1 FX v1: integrated firmware bring-up (rc6 current)
+# SP-1 FX v1: integrated firmware bring-up (2026.11.25 current)
+
+## 2026.11.25 = rc6 + companion feature list -- NOT RUN ON HARDWARE
+
+| | |
+|---|---|
+| File | `sp1fx-2026.11.25.bin` (ELF: `sp1fx-2026.11.25.elf`), GitHub release `v2026.11.25` |
+| SHA-256 | `74656b23c8982a4955c55b2e6af9d747599f4f46358577a39c6f57ab11fa0214` (in the release's `SHA256SUMS`) |
+| Size | 153,644 B at 0x20000, `check_image.py` PASS, two clean builds identical |
+
+The device behaves like rc6 (same tests below). New: the companion's Firmware tile shows `sp1fx-2026.11.25`
+and nothing is grayed out. With rc6 on the device, this companion also works (it assumes rc6 features). Report
+if any control is grayed out or a "needs newer firmware" note appears with this image.
+
 
 ## rc6 (2026-11-24) = rc5 + battery fuel gauge -- NOT RUN ON HARDWARE
 
