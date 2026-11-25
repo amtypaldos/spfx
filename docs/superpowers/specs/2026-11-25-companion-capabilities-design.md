@@ -51,9 +51,10 @@ failing. Only future releases matter. Everything so far is an RC, so no per-RC s
 
 **Firmware (`firmware/protocol/`):**
 - `build_hello` appends caps.
-- Bits that follow from `proto_config_t` are derived from it: sync != NULL, save != NULL, batt_pct != NULL,
-  power_flags != NULL.
-- The output-mode bits come from a new config field set by the app, with zephyr_sp1fx setting both.
+- The app declares its features in a new `proto_config_t.caps` field (`PROTO_CAP_*` bits); HELLO_RSP sends it as is.
+  Not derived from the other config pointers: zephyr_sp1fx drives the sync jack itself and passes `sync = NULL`
+  (`main.c`), so a derived SYNC bit would be wrong (found while planning).
+- SET_OUTPUT_MODE answers BAD_ARG for a mode whose cap bit is not set (zephyr_sp1fx sets both, so no change there).
 - `CONFIG_SP1FX_FW_VERSION` -> `sp1fx-YYYY.MM.DD` of the release (see Version numbers).
 - No change to the audio path.
 
