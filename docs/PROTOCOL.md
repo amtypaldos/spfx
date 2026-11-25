@@ -35,13 +35,27 @@ Max body 512 bytes (payload 500 + 5 bytes of overhead + COBS expansion is handle
 | 0x17 | SET_ORDER | `o0..o3 u8` (permutation of 0..3) | 0x90 |
 | 0x18 | SET_BPM | `bpm10 u16` (300..3000) | 0x90 |
 | 0x19 | SET_SYNC | `on u8` (0 or 1): start/stop the sync-jack clock (MIDI clock + PO pulses) | 0x90 |
-| 0x1A | SET_OUTPUT_MODE | `mode u8`: headphone jack 0 = headphones (default), 1 = line out (+36 dB; firmware v1-rc4+), 2 = loud (+15 dB; v1-rc5+) | 0x90 |
+| 0x1A | SET_OUTPUT_MODE | `mode u8`: headphone jack 0 = headphones (default), 1 = line out (+36 dB; firmware v1-rc4+), 2 = loud (+15 dB; v1-rc5+). A mode whose `caps` bit (OUT_LINE / OUT_LOUD) is clear is answered with code 1 | 0x90 |
 | 0x20 | SAVE_NOW | - | 0x90 |
 | 0x21 | FACTORY_RESET | `0xA5` (confirmation byte) | 0x90 |
 | 0x30 | SUBSCRIBE | `hz u8` (0 = off, 1..20) | 0x90 |
 
 ## Device to host
-**0x81 HELLO_RSP**: `proto u8, fw_len u8, fw[fw_len] ascii, fx_count u8, sample_rate u32, block u16, pool_bytes u32, cpu_budget u16`
+**0x81 HELLO_RSP**: `proto u8, fw_len u8, fw[fw_len] ascii, fx_count u8, sample_rate u32, block u16, pool_bytes u32, cpu_budget u16`, then (firmware 2026.11.25+) `caps u32`.
+
+`caps` lists the features this firmware supports. A host disables (grays out) controls whose bit is clear. If the field is absent (firmware v1-rc6 and earlier), the host assumes `0x3F` (the rc6 set). Hosts ignore bits they do not know. Bits:
+
+| Bit | Name | Meaning |
+|---|---|---|
+| 0 | SYNC | Sync-jack clock: SET_SYNC starts/stops it, SET_BPM sets its tempo |
+| 1 | OUT_LINE | SET_OUTPUT_MODE 1 (line out) |
+| 2 | OUT_LOUD | SET_OUTPUT_MODE 2 (loud) |
+| 3 | BATTERY | METERS carries a meaningful `batt_pct` |
+| 4 | SAVE | SAVE_NOW has a storage backend |
+| 5 | POWER_FLAGS | METERS flags bits 1-2 (USB power, charging) are reported |
+| 6-31 | reserved | 0; each new optional feature takes the next bit in the same spec change |
+
+The `fw` string is for display only. From 2026.11.25 it is date-based, `sp1fx-YYYY.MM.DD` (a second release on the same day appends `.2`, `.3`); earlier images used `sp1fx-v1-rcN`. Hosts must not parse it to decide features: use `caps`.
 
 **0x82 FX_DESC**: `id u8, name_len u8, name, nparams u8, cpu_cycles u16, mem_bytes u32, tail_ms u32, mix_mode u8 (0 crossfade, 1 send)`, then per param: `name_len u8, name, unit_len u8, unit, min f32, max f32, def f32, scale u8 (0 lin, 1 log, 2 step), labels_len u8, labels` (labels is a comma-separated list for step params, else empty). Floats are IEEE-754 little-endian.
 
@@ -67,6 +81,7 @@ Max body 512 bytes (payload 500 + 5 bytes of overhead + COBS expansion is handle
 - **Output mode** (`SET_OUTPUT_MODE`): a device setting, not part of a preset; firmware rc5 starts every power-up at headphones and returns to headphones when something is plugged into the jack at a louder level; FACTORY_RESET returns to headphones. Switching to a louder level lowers the master volume by the difference (15 or 36 dB) so the level never jumps (the host sees the new master in its next GET_STATE / it should re-read state after the RESULT).
 
 ## Rules
+- **Forward compatibility:** a host must ignore unknown trailing bytes at the end of any device-to-host message (types 0x80-0xFF, including the setter inside an EVENT), so newer firmware can append fields. Hosts from before 2026.11.25 reject them (they check for trailing bytes). The device stays strict about host-to-device requests.
 - Fader changes are rate-limited by the device to 20 events/s per control. The host should coalesce slider drags to about 30 messages/s.
 - After any host-originated change the device re-arms soft takeover for the affected controls, so physical faders never make the value jump.
 - The device persists changes on its own (firmware v1-rc4: event-based: setting changes such as effect, order, BPM, sync, output mode, factory reset are saved ~1.5 s after the last one; continuous controls such as wet, params, master, input gain, bypass are kept in RAM and saved with the next event, at power off, by SAVE_NOW, or after 120 s; nothing is written while the device's CPU load is high). The host does not have to call SAVE_NOW, but should if it wants continuous-control changes on flash at once.

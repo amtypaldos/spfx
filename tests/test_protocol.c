@@ -62,6 +62,7 @@ static void setup_budget(uint32_t budget)
 	c.eng = &eng; c.ctl = &ui; c.sync = &syn; c.deb = &deb;
 	c.tx = tx; c.save = save_cb; c.ctx = NULL;
 	c.fw = "sp1fx-golden"; c.block = 64; c.bpm = 120.0f;
+	c.caps = PROTO_CAP_SYNC | PROTO_CAP_OUT_LINE | PROTO_CAP_OUT_LOUD | PROTO_CAP_SAVE; /* = G_HELLO_CAPS */
 	proto_init(&pr, &c);
 	save_calls = 0; save_result = 0;
 	T = 1000;
@@ -396,7 +397,7 @@ static void test_hello_rsp_layout(void)
 	const uint8_t *p = r->pay;
 	size_t fl = strlen(G_HELLO_FW);
 	CHECK(r->type == PT_HELLO_RSP && r->seq == G_HELLO_SEQ);
-	CHECK(r->len == 1 + 1 + fl + 1 + 4 + 2 + 4 + 2);
+	CHECK(r->len == 1 + 1 + fl + 1 + 4 + 2 + 4 + 2 + 4);
 	CHECK(p[0] == G_HELLO_PROTO);
 	CHECK(p[1] == fl && memcmp(p + 2, G_HELLO_FW, fl) == 0);
 	p += 2 + fl;
@@ -405,6 +406,8 @@ static void test_hello_rsp_layout(void)
 	CHECK(g16(p + 5) == G_HELLO_BLOCK);
 	CHECK(g32(p + 7) == G_HELLO_POOL && g32(p + 7) == sizeof pool);
 	CHECK(g16(p + 11) == G_HELLO_BUDGET && g16(p + 11) == ENGINE_DEFAULT_CPU_BUDGET);
+	CHECK(g32(p + 13) == G_HELLO_CAPS && g32(p + 13) == 0x17u); /* 2026.11.25: caps */
+	CHECK(PROTO_CAPS_RC6 == 0x3Fu);
 }
 
 static const char *nz(const char *s) { return s ? s : ""; }
@@ -832,6 +835,30 @@ static void test_output_mode(void)
 	pr.c.on_host_change = NULL;
 }
 
+/* 2026.11.25: an output mode whose caps bit is clear is refused */
+static void test_output_mode_needs_cap(void)
+{
+	setup();
+	pr.c.caps = PROTO_CAP_OUT_LINE; /* no OUT_LOUD */
+	uint8_t v = 2;
+	clear_tx();
+	request(PT_SET_OUTPUT_MODE, 31, &v, 1);
+	CHECK(result_code(PT_SET_OUTPUT_MODE, 31) == PR_BAD_ARG && pr.out_mode == 0 && !pr.dirty);
+	v = 1;
+	clear_tx();
+	request(PT_SET_OUTPUT_MODE, 32, &v, 1);
+	CHECK(result_code(PT_SET_OUTPUT_MODE, 32) == PR_OK && pr.out_mode == 1);
+	pr.c.caps = 0; /* headphones (0) needs no cap */
+	v = 0;
+	clear_tx();
+	request(PT_SET_OUTPUT_MODE, 33, &v, 1);
+	CHECK(result_code(PT_SET_OUTPUT_MODE, 33) == PR_OK && pr.out_mode == 0);
+	v = 1;
+	clear_tx();
+	request(PT_SET_OUTPUT_MODE, 34, &v, 1);
+	CHECK(result_code(PT_SET_OUTPUT_MODE, 34) == PR_BAD_ARG && pr.out_mode == 0);
+}
+
 static void test_meters_content(void)
 {
 	setup();
@@ -1027,6 +1054,7 @@ int main(void)
 	RUN(test_sync_clock_switch);
 	RUN(test_subscribe_timing);
 	RUN(test_output_mode);
+	RUN(test_output_mode_needs_cap);
 	RUN(test_meters_content);
 	RUN(test_factory_reset);
 	T_DONE();

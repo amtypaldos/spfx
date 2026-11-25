@@ -2,7 +2,7 @@
 // It speaks the real wire format (COBS + CRC framing) so the host runs its real client code path.
 // This is a simulation written from the spec, NOT firmware and NOT evidence about real hardware.
 import {
-  T, RESULT, FrameDecoder, buildFrame, parseFrame, FACTORY_RESET_CONFIRM, SETTER_TYPES,
+  T, RESULT, FrameDecoder, buildFrame, parseFrame, FACTORY_RESET_CONFIRM, SETTER_TYPES, CAP, CAPS_RC6,
 } from './protocol.js';
 import { descFromFx, checkAdmission, defaultNorm, POOL_BYTES, CPU_BUDGET } from './fx.js';
 
@@ -19,8 +19,8 @@ export function mulberry32(seed) {
 
 export class MockDevice {
   /** @param fxTable canonical table (see fx.js). */
-  constructor(fxTable, { rng = Math.random, fw = 'mock-0.1 (simulated)', poolBytes = POOL_BYTES, cpuBudget = CPU_BUDGET } = {}) {
-    this.fx = fxTable; this.rng = rng; this.fw = fw; this.pool = poolBytes; this.cpuBudget = cpuBudget;
+  constructor(fxTable, { rng = Math.random, fw = 'mock-0.1 (simulated)', poolBytes = POOL_BYTES, cpuBudget = CPU_BUDGET, caps = CAPS_RC6 } = {}) {
+    this.fx = fxTable; this.rng = rng; this.fw = fw; this.pool = poolBytes; this.cpuBudget = cpuBudget; this.caps = caps;
     this.decoder = new FrameDecoder();
     this.onOutput = null;            // (Uint8Array) => void
     this.sampleRate = 48000; this.block = 48;
@@ -83,7 +83,9 @@ export class MockDevice {
       case T.SET_ORDER: s.order = g.order.slice(); return RESULT.OK;
       case T.SET_BPM: s.bpm10 = g.bpm10; return RESULT.OK;
       case T.SET_SYNC: s.syncOn = g.on; return RESULT.OK;
-      case T.SET_OUTPUT_MODE: s.outMode = g.mode; return RESULT.OK;
+      case T.SET_OUTPUT_MODE:
+        if ((g.mode === 1 && !(this.caps & CAP.OUT_LINE)) || (g.mode === 2 && !(this.caps & CAP.OUT_LOUD))) return RESULT.BAD_ARG;
+        s.outMode = g.mode; return RESULT.OK;
       default: return RESULT.BAD_ARG;
     }
   }
@@ -98,14 +100,14 @@ export class MockDevice {
     switch (m.type) {
       case T.HELLO:
         this._emit({ type: T.HELLO_RSP, proto: 1, fw: this.fw, fxCount: this.fx.length, sampleRate: this.sampleRate,
-          block: this.block, poolBytes: this.pool, cpuBudget: this.cpuBudget }, seq);
+          block: this.block, poolBytes: this.pool, cpuBudget: this.cpuBudget, caps: this.caps }, seq);
         break;
       case T.GET_FX:
         if (m.idx >= this.fx.length) this._result(m, RESULT.BAD_ARG, seq);
         else this._emit(descFromFx(this.fx[m.idx]), seq);
         break;
       case T.GET_STATE: this._emit({ type: T.STATE, ...this.s, fxCount: this.fx.length }, seq); break;
-      case T.SAVE_NOW: this._result(m, RESULT.OK, seq); break;
+      case T.SAVE_NOW: this._result(m, this.caps & CAP.SAVE ? RESULT.OK : RESULT.STORAGE, seq); break;
       case T.FACTORY_RESET:
         if (m.confirm !== FACTORY_RESET_CONFIRM) { this._result(m, RESULT.BAD_ARG, seq); break; }
         this.factoryReset(); this._result(m, RESULT.OK, seq); break;

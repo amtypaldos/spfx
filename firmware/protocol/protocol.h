@@ -41,6 +41,16 @@ enum {
 #define PROTO_FACTORY_RESET_CONFIRM 0xA5u
 #define PROTO_EVENT_MIN_INTERVAL_MS 50u /* 20 events/s per fader-type control */
 
+/* HELLO_RSP caps (firmware 2026.11.25+, docs/PROTOCOL.md): features this image supports.
+ * Declared by the app in proto_config_t.caps; hosts gray out what is missing. */
+#define PROTO_CAP_SYNC        (1u << 0) /* sync-jack clock (SET_SYNC / SET_BPM) */
+#define PROTO_CAP_OUT_LINE    (1u << 1) /* SET_OUTPUT_MODE 1 */
+#define PROTO_CAP_OUT_LOUD    (1u << 2) /* SET_OUTPUT_MODE 2 */
+#define PROTO_CAP_BATTERY     (1u << 3) /* METERS batt_pct */
+#define PROTO_CAP_SAVE        (1u << 4) /* SAVE_NOW has a storage backend */
+#define PROTO_CAP_POWER_FLAGS (1u << 5) /* METERS flags bits 1-2 */
+#define PROTO_CAPS_RC6        0x3Fu     /* what a host assumes when caps is absent */
+
 /* ---- primitives (exposed for tests) ---- */
 uint16_t proto_crc16(const uint8_t *p, size_t n); /* CRC-16/CCITT-FALSE */
 /* Returns encoded length (no delimiter), or 0 if `cap` is too small. Byte-identical to
@@ -88,6 +98,8 @@ typedef struct {
 	uint8_t (*power_flags)(void *ctx);
 	/* optional: battery 0..100 %, 255 unknown (METERS trailing byte, rc6) */
 	uint8_t (*batt_pct)(void *ctx);
+	/* PROTO_CAP_* bits sent in HELLO_RSP; SET_OUTPUT_MODE refuses modes whose bit is clear */
+	uint32_t caps;
 } proto_config_t;
 
 typedef struct {

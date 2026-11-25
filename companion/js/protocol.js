@@ -27,6 +27,9 @@ export const SETTER_TYPES = Object.freeze([
   T.SET_SLOT_FX, T.SET_PARAM, T.SET_WET, T.SET_BYPASS, T.SET_GLOBAL_BYPASS,
   T.SET_MASTER, T.SET_INPUT_GAIN, T.SET_ORDER, T.SET_BPM, T.SET_SYNC, T.SET_OUTPUT_MODE,
 ]);
+// HELLO_RSP caps (firmware 2026.11.25+): features the device supports. Absent = the rc6 set.
+export const CAP = Object.freeze({ SYNC: 1, OUT_LINE: 2, OUT_LOUD: 4, BATTERY: 8, SAVE: 16, POWER_FLAGS: 32 });
+export const CAPS_RC6 = 0x3F;
 export const RESULT = Object.freeze({ OK: 0, BAD_ARG: 1, NO_MEMORY: 2, NO_CPU: 3, BUSY: 4, STORAGE: 5 });
 export const FACTORY_RESET_CONFIRM = 0xA5;
 
@@ -194,6 +197,7 @@ export function encodePayload(msg) {
       w.u8(msg.proto).u8(enc.encode(msg.fw).length);
       w.a.push(...enc.encode(msg.fw));
       w.u8(msg.fxCount).u32(msg.sampleRate).u16(msg.block).u32(msg.poolBytes).u16(msg.cpuBudget);
+      if (msg.caps !== undefined) w.u32(msg.caps >>> 0);
       break;
     case T.FX_DESC:
       w.u8(msg.id).str(msg.name).u8(msg.params.length).u16(msg.cpuCycles).u32(msg.memBytes).u32(msg.tailMs)
@@ -222,7 +226,9 @@ export function encodePayload(msg) {
   return w.bytes();
 }
 
-export function decodePayload(type, payload) {
+// Device->host messages (0x80-0xFF, and the setter inside an EVENT) ignore unknown trailing bytes so
+// newer firmware can append fields (PROTOCOL.md, Rules). Host->device requests stay strict.
+export function decodePayload(type, payload, { lenient = type >= 0x80 } = {}) {
   const r = new Reader(payload);
   let m;
   switch (type) {
@@ -248,6 +254,7 @@ export function decodePayload(type, payload) {
 
     case T.HELLO_RSP: {
       m = { type, proto: r.u8(), fw: r.str(), fxCount: r.u8(), sampleRate: r.u32(), block: r.u16(), poolBytes: r.u32(), cpuBudget: r.u16() };
+      m.caps = r.more() ? r.u32() : CAPS_RC6;   // 2026.11.25+
       break;
     }
     case T.FX_DESC: {
@@ -269,7 +276,7 @@ export function decodePayload(type, payload) {
     case T.EVENT: {
       const st = r.u8();
       if (!SETTER_TYPES.includes(st)) throw new ProtocolError('event carries non-setter type');
-      return { type, setter: decodePayload(st, payload.subarray(1)) };
+      return { type, setter: decodePayload(st, payload.subarray(1), { lenient: true }) };
     }
     case T.ADMISSION_ERROR: m = { type, slot: checkSlot(r.u8()), fx: r.u8(), code: r.u8() }; break;
     case T.PRESET_LOADED: m = { type, idx: r.u8(), bpm10: r.u16() }; break;
@@ -288,7 +295,7 @@ export function decodePayload(type, payload) {
       break;
     default: throw new ProtocolError(`unknown message type 0x${type.toString(16)}`);
   }
-  r.done();
+  if (!lenient) r.done();
   return m;
 }
 

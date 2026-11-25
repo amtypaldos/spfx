@@ -2106,6 +2106,8 @@ int main(void)
 		.save = proto_save_now, .ctx = NULL, .fw = FW_VERSION, .block = BLK_FRAMES,
 		.bpm = boot_d.bpm, .sync_on = boot_d.sync_on, .power_flags = proto_power_flags, .batt_pct = proto_batt_pct,
 		.on_host_change = proto_host_change, .out_mode = g_out_mode,
+		.caps = PROTO_CAP_SYNC | PROTO_CAP_OUT_LINE | PROTO_CAP_OUT_LOUD | PROTO_CAP_BATTERY |
+			PROTO_CAP_SAVE | PROTO_CAP_POWER_FLAGS,
 	};
 
 	proto_init(&proto, &pc);

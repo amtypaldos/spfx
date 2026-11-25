@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   cobsEncode, cobsDecode, crc16, encodeFrame, decodeFrame, FrameDecoder, buildFrame, parseFrame,
-  encodePayload, decodePayload, T, n2u16, u162n, ProtocolError,
+  encodePayload, decodePayload, T, n2u16, u162n, ProtocolError, CAP, CAPS_RC6,
 } from '../js/protocol.js';
 import { descFromFx } from '../js/fx.js';
 import { fxTable } from './helpers.mjs';
@@ -152,9 +152,36 @@ test('host messages: argument validation', () => {
   assert.throws(() => decodePayload(0x55, bytes()), ProtocolError);                   // unknown type
 });
 
-test('HELLO_RSP round trip', () => {
-  const m = { type: T.HELLO_RSP, proto: 1, fw: 'sp1fx-0.1.0', fxCount: 11, sampleRate: 48000, block: 48, poolBytes: 153600, cpuBudget: 850 };
+test('HELLO_RSP round trip, with caps (2026.11.25+)', () => {
+  const m = { type: T.HELLO_RSP, proto: 1, fw: 'sp1fx-2026.11.25', fxCount: 11, sampleRate: 48000, block: 48, poolBytes: 153600, cpuBudget: 850, caps: 0x17 };
   assert.deepEqual(decodePayload(T.HELLO_RSP, encodePayload(m)), m);
+  assert.equal(CAP.SYNC | CAP.OUT_LINE | CAP.OUT_LOUD | CAP.SAVE, 0x17);
+  assert.equal(CAPS_RC6, 0x3F);
+});
+
+test('HELLO_RSP without caps (rc6 and earlier) means the rc6 feature set', () => {
+  const m = { type: T.HELLO_RSP, proto: 1, fw: 'sp1fx-v1-rc6', fxCount: 11, sampleRate: 48000, block: 48, poolBytes: 153600, cpuBudget: 850 };
+  assert.equal(decodePayload(T.HELLO_RSP, encodePayload(m)).caps, CAPS_RC6);
+});
+
+test('HELLO_RSP with unknown caps bits and extra trailing bytes decodes', () => {
+  const m = { type: T.HELLO_RSP, proto: 1, fw: 'sp1fx-2099.01.01', fxCount: 11, sampleRate: 48000, block: 48, poolBytes: 153600, cpuBudget: 850, caps: 0xFFFFFFFF };
+  const p = encodePayload(m);
+  const longer = Uint8Array.from([...p, 1, 2, 3]);
+  assert.equal(decodePayload(T.HELLO_RSP, longer).caps, 0xFFFFFFFF);
+});
+
+test('device->host messages ignore trailing bytes; host->device requests stay strict', () => {
+  const mt = { type: T.METERS, inPeak: 1, outPeak: 2, cpuPct: 3, cpuPeakPct: 4, memUsed: 5, inClips: 0, outClips: 0, underruns: 0, overruns: 0, nanEvents: 0, uiMode: 0, editSlot: 0, globalBypass: false, usbPower: false, charging: false, guardForced: false, guardShed: 0, battPct: 50 };
+  assert.deepEqual(decodePayload(T.METERS, Uint8Array.from([...encodePayload(mt), 9, 9])), mt);
+  const st = decodePayload(T.STATE, encodePayload(sampleState()));
+  const stEnc = encodePayload({ ...st, type: T.STATE });
+  assert.deepEqual(decodePayload(T.STATE, Uint8Array.from([...stEnc, 7, 7])), st);
+  const req = encodePayload({ type: T.SET_PARAM, slot: 0, idx: 1, v: 0.5 });
+  assert.throws(() => decodePayload(T.SET_PARAM, Uint8Array.from([...req, 0])), /trailing bytes/);
+  // an EVENT (device->host) carrying a setter with an extra byte is accepted
+  const ev = Uint8Array.from([T.SET_PARAM, ...req, 0]);
+  assert.equal(decodePayload(T.EVENT, ev).setter.type, T.SET_PARAM);
 });
 
 test('FX_DESC round trip for every effect in the table, and fits in 250 bytes', () => {

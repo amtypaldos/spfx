@@ -75,7 +75,7 @@ out.push(`#define GOLDEN_NREQ ${requests.length}`);
 out.push('');
 
 // ------------------------------------------------------------------ HELLO_RSP
-const hello = { type: T.HELLO_RSP, proto: 1, fw: 'sp1fx-golden', fxCount: 11, sampleRate: 48000, block: 64, poolBytes: 153600, cpuBudget: 850 };
+const hello = { type: T.HELLO_RSP, proto: 1, fw: 'sp1fx-golden', fxCount: 11, sampleRate: 48000, block: 64, poolBytes: 153600, cpuBudget: 850, caps: 0x17 };
 {
   const fr = buildFrame(hello, 1);
   const m = jsDecode(fr).msg;
@@ -88,6 +88,7 @@ const hello = { type: T.HELLO_RSP, proto: 1, fw: 'sp1fx-golden', fxCount: 11, sa
   out.push(`#define G_HELLO_BLOCK ${m.block}u`);
   out.push(`#define G_HELLO_POOL ${m.poolBytes}u`);
   out.push(`#define G_HELLO_BUDGET ${m.cpuBudget}u`);
+  out.push(`#define G_HELLO_CAPS 0x${m.caps.toString(16)}u`);
   out.push('');
 }
 

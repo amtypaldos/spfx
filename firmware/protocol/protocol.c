@@ -193,6 +193,7 @@ static void build_hello(proto_t *p, wr_t *w)
 	w16(w, p->c.block);
 	w32(w, e->pool_bytes);
 	w16(w, e->cpu_budget > 0xFFFFu ? 0xFFFFu : e->cpu_budget);
+	w32(w, p->c.caps); /* 2026.11.25+ */
 }
 
 static void build_fx_desc(const fx_desc *d, wr_t *w)
@@ -335,6 +336,8 @@ static void handle(proto_t *p, const proto_frame_t *f)
 	case PT_SET_OUTPUT_MODE:
 		NEED(1);
 		if (a[0] > 2) { code = PR_BAD_ARG; break; } /* 0 headphones, 1 line out, 2 loud */
+		if ((a[0] == 1 && !(p->c.caps & PROTO_CAP_OUT_LINE)) ||
+		    (a[0] == 2 && !(p->c.caps & PROTO_CAP_OUT_LOUD))) { code = PR_BAD_ARG; break; }
 		p->out_mode = a[0];
 		break;
 	case PT_SAVE_NOW:
