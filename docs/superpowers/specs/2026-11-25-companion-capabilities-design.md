@@ -1,6 +1,6 @@
 # Companion feature detection (capabilities in HELLO_RSP)
 
-Status: design, approved approach A (2026-11-25). Short design (small change).
+Status: design, approved approach A (2026-11-25), plus date-based version numbers (owner request). Short design (small change).
 
 ## Intent
 
@@ -14,6 +14,7 @@ failing. Only future releases matter. Everything so far is an RC, so no per-RC s
 - Companions ignore unknown trailing bytes in device messages, so an older companion keeps working with
   newer firmware (it just doesn't show the new things).
 - New features in future releases only need a new capability bit.
+- Releases are named by date instead of `v1-rcN` (owner request, 2026-11-25).
 
 ## Non-goals / anti-goals
 
@@ -53,7 +54,7 @@ failing. Only future releases matter. Everything so far is an RC, so no per-RC s
 - Bits that follow from `proto_config_t` are derived from it: sync != NULL, save != NULL, batt_pct != NULL,
   power_flags != NULL.
 - The output-mode bits come from a new config field set by the app, with zephyr_sp1fx setting both.
-- `CONFIG_SP1FX_FW_VERSION` -> `sp1fx-v1-rc7`.
+- `CONFIG_SP1FX_FW_VERSION` -> `sp1fx-YYYY.MM.DD` of the release (see Version numbers).
 - No change to the audio path.
 
 **Companion:**
@@ -74,8 +75,19 @@ failing. Only future releases matter. Everything so far is an RC, so no per-RC s
   - the UI model disables the right controls for a reduced caps mask.
 - `make test` 0 warnings; companion tests pass.
 
+**Version numbers (date-based, from this release on):**
+- Format `YYYY.MM.DD`, the release date. A second or third release on the same day gets `.2`, `.3`
+  (rc4-rc6 all shipped on 2026-11-24, so this happens).
+- Firmware string `sp1fx-2026.11.26`, git tag `v2026.11.26` (the `v` prefix keeps the Pages workflow trigger `v*`),
+  image `sp1fx-2026.11.26.bin` / `.elf`, companion zip `sp1fx-companion-2026.11.26.zip`.
+- "Not run on hardware" is shown by the GitHub pre-release flag and the STATUS.md label, no longer by "rc" in the name.
+  The release is promoted (pre-release flag off) once the owner reports it working on hardware.
+- The protocol version (`proto` in HELLO_RSP, currently 1) stays separate and only changes on breaking wire changes.
+- Old `v1-rcN` tags, releases and docs stay as history; the docs say once where the scheme changed.
+- Nothing parses the version string (checked: only the Kconfig default and a test fixture name contain it).
+
 **Release:**
-- rc7 is built with `--app sp1fx repro`.
+- The first date-named image (replaces the planned rc7) is built with `--app sp1fx repro`.
 - STATUS.md / BRINGUP_SP1FX.md updated, labelled NOT RUN ON HARDWARE.
 - The owner flashes. No flashing by agents.
 
