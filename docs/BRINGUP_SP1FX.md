@@ -469,8 +469,10 @@ LED flash + bar; one Clean.
 
 ## Stage 3: companion, saving, reload (15 min)
 
-1. Close `screen`. Start the companion (`cd companion && npm run serve`, open
-   http://localhost:8137 in desktop Chrome), connect, pick the SP-1 FX port.
+1. Close `screen`. Open the companion in desktop Chrome: the hosted copy at
+   https://amtypaldos.github.io/spfx/ if the image under test is the latest release, otherwise
+   run it locally from the image's tag (`cd companion && npm run serve`, open
+   http://localhost:8137). Connect and pick the SP-1 FX port.
 2. Expect it to connect (HELLO, effect table, state, meters). Meters move with the music.
 3. Change things from the companion (an effect, wet, a parameter, BPM 100) and on the device
    (fader, VOL, FN + rocker): both sides stay in sync (device changes appear in the companion).

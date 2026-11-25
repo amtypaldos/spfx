@@ -46,7 +46,7 @@ Text summary of the controls, for readers who cannot see the image:
 - **Processing:** the nRF52840 (Cortex-M4F, 64 MHz) runs a 4-slot serial effect chain in 64-frame blocks. The engine has a 150 KiB effect memory pool and rejects configurations that do not fit the memory or CPU budget.
 - **Output:** processed audio goes out over I2S to the headphone codec (CS42L42) or the speaker amplifier (TAS2505). Image B also returns the processed audio to the host as a second USB input device.
 - **Sync:** the second 3.5 mm jack is a digital **output** only: MIDI clock and Start/Stop on the ring, Pocket Operator sync pulses on the tip. It does not carry audio (`docs/ADR-001-audio-routing.md`).
-- **Control:** a companion web app talks to the device over the USB serial port with the Web Serial API. It is used for presets, tempo and sync settings, and to view status. The protocol is specified in `docs/PROTOCOL.md`. The companion is a static page with no dependencies (`companion/README.md`).
+- **Control:** a companion web app talks to the device over the USB serial port with the Web Serial API. It is used for presets, tempo and sync settings, and to view status. The protocol is specified in `docs/PROTOCOL.md`. The companion is a static page with no dependencies. Use the hosted copy at <https://amtypaldos.github.io/spfx/> or run it locally (`companion/README.md`).
 
 Routing decision: USB audio in, headphone and speaker out, digital sync out (`docs/ADR-001-audio-routing.md`). Standalone analog input is not possible on this hardware.
 
@@ -89,12 +89,15 @@ build/sp1fx_sim --list
 build/sp1fx_sim in.wav out.wav --slot 1=filter --param 1.1=800 --slot 2=delay --wet 2=0.4 --tail 2
 ```
 
-Companion tests (Node 22):
+Companion app (desktop Chrome or Edge for Web Serial). Either:
+
+- **Hosted:** open <https://amtypaldos.github.io/spfx/>. GitHub Pages publishes it from the latest release tag, so it matches the latest firmware release.
+- **Locally:** serve `companion/` with any static server (needed for unreleased changes, or to use a companion that matches an older image: check out that image's tag first):
 
 ```sh
 cd companion
-node --test tests/*.test.mjs     # or: npm test
 npm run serve                    # static server on http://localhost:8137
+node --test tests/*.test.mjs     # tests, Node 22 (or: npm test)
 ```
 
 Firmware (Zephyr) build. This needs an Apple Silicon Mac, Homebrew Python 3.10+, and about 1.5 GB of disk. See `docs/BUILD.md` for the full prerequisites and pinned versions (Zephyr v4.3.1, SDK 0.17.4):
