@@ -158,19 +158,22 @@ Bring-up procedures and pass/fail checklists are in `docs/BRINGUP_SP1FX.md` (int
 
 ## Credits and licences
 
-- **Tape Looper** by chattock (MIT), `sp1-tape-looper` at commit `0359372e`. The SP-1 board definition is a verbatim copy. The CS42L42 and TAS2505 codec code and the ladder, fader and LED handling are adapted from it. Each adapted file keeps its licence header.
+- **Tape Looper** by chattock (MIT), `sp1-tape-looper` at commit `0359372e`. The SP-1 board definition is a verbatim copy. The CS42L42 and TAS2505 codec code, the ladder, fader and LED handling, the MIDI/PO sync output and the USB feedback law are adapted from it. Each adapted file names its source in a comment (`sp1_codecs.c` keeps Tape Looper's full MIT header), and the app folders' `NOTICES.md` files give the details.
 - **Tim Knapen's SP-1-dev** (MIT). Pin map, hardware documentation, and the CS42L42 init sequence the codec code is based on.
-- **Zephyr RTOS** (Apache-2.0), v4.3.1, with its modules (CMSIS, Nordic HAL, MIT and BSD-licensed parts). These are downloaded at build time and not redistributed here. Built images contain Zephyr code and carry those notices.
+- **Eric Lewis's sp1-midi** (MIT). The Tape Looper board devicetree was reconstructed in part from its `stem_player` board.
+- **Zephyr RTOS** (Apache-2.0), v4.3.1, and its modules: **CMSIS_6** by Arm (Apache-2.0) and **nrfx / nRF MDK** by Nordic Semiconductor (BSD-3-Clause). Built with the **Zephyr SDK** 0.17.4 (GCC), whose **picolibc** C library and GCC runtime are linked into the images. These are downloaded at build time and not redistributed in this repository.
+- **Binary images** must ship with [docs/BINARY_NOTICES.md](docs/BINARY_NOTICES.md): the licence texts and copyright lines for everything linked into the firmware, taken from the linker map.
 - **Teenage Engineering and Kano** hardware. The SP-1 hardware, its name and its branding belong to their owners.
 - **Bluetooth firmware is not redistributed.** The Infineon radio image and its SDK are not part of this project and are not used by it.
 - Tape Looper's UAC2 Windows patch is not applied.
 
 Full list of upstream commits, licences, research references and open reviews: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-This project is released under the **MIT licence**, see [LICENSE](LICENSE). Files copied or adapted from other projects keep their own licence headers, and the upstream licence texts are in `firmware/boards/LICENSES/` and `companion/LICENSES/`.
+This project is released under the **MIT licence**, see [LICENSE](LICENSE). Files copied or adapted from other projects name their source and keep any licence header they came with, and the upstream licence texts are in `firmware/boards/LICENSES/` and `companion/LICENSES/`.
 
 Also credited, with no code copied from them:
 - **Tape Looper's DSP design** informed the efficiency work: lower-rate reverb and echo, cheap LFOs, block-based coefficient updates and an engine overload guard. See [docs/research/TAPELOOPER_DSP_NOTES.md](docs/research/TAPELOOPER_DSP_NOTES.md). Only the techniques were used, not the code.
 - **Tape Looper's companion site** is the model for the companion's look and feel (palette, top bar, cards, tabs).
-- **The Marisko firmware guide** is the model for the printed controls guide's card-and-leader-line layout. Its artwork and text are not reused.
+- **The Marisko firmware guide** (jackiscool123123121/marisko) is the model for the printed controls guide's card-and-leader-line layout. Its artwork and text are not reused.
+- **Published DSP methods**: Zavalishin's TPT state-variable filter, Schroeder allpass diffusion and a Hadamard feedback delay network, Marsaglia's xorshift; COBS framing by Cheshire and Baker. Own implementations (see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
 - **solderless.engineering** is the browser flasher the owner uses to install images. Nothing from it is included here.

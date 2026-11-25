@@ -1,13 +1,18 @@
 firmware/boards/teenageengineering/stem_player/ is copied unmodified from
 chattock/sp1-tape-looper (https://github.com/chattock/sp1-tape-looper),
 directory boards/teenageengineering/stem_player, commit
-0359372e11f61d74a85e2e4449178a5c62010664.
+0359372e11f61d74a85e2e4449178a5c62010664 (all 8 files are byte-identical to
+that commit; checked by git blob hash).
 
-  Tape-Looper-MIT.txt          MIT License, Copyright (c) 2026 chattock (repository licence)
-  Apache-2.0.txt               Apache License 2.0 (SPDX header on the Kconfig/defconfig/yaml files)
-  Tim-Knapen-SP1-dev-MIT.txt   MIT License, Copyright (c) 2026 Tim Knapen (pin map / wiki the
-                               devicetree was reconstructed from, per its header)
+  Tape-Looper-MIT.txt            MIT License, Copyright (c) 2026 chattock (repository licence)
+  Apache-2.0.txt                 Apache License 2.0 (SPDX header on the Kconfig/defconfig files)
+  Tim-Knapen-SP1-dev-MIT.txt     MIT License, Copyright (c) 2026 Tim Knapen (timknapen/SP-1-dev,
+                                 commit af2c50315996dfe5c78725995dbe498790ad763c: the pin map /
+                                 wiki the devicetree was reconstructed from, per its header)
+  Eric-Lewis-sp1-midi-MIT.txt    MIT License, Copyright (c) 2026 Eric Lewis (ericlewis/sp1-midi,
+                                 commit 43f5eae90d999a7defd9a20d06cd1bf4612fa235: the devicetree
+                                 header says it is reconstructed in part from that project's
+                                 stem_player board)
 
-The devicetree header also credits ericlewis/sp1-midi's stem_player board (MIT);
-that licence text has not been reviewed or copied yet.
-Original file headers are retained. See THIRD_PARTY_NOTICES.md at the repo root.
+Original file headers are retained. See THIRD_PARTY_NOTICES.md at the repo root,
+and docs/BINARY_NOTICES.md for the notices that go with built firmware images.

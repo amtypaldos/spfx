@@ -5,7 +5,7 @@
 | Path | Source | Commit | License | Notes |
 |---|---|---|---|---|
 | `firmware/app/zephyr_tone/src/sp1_codecs.c` (adapted; licence + copyright header kept in the file) | chattock/sp1-tape-looper `tools/capacity422/runtime/src/main.c`: `tas_wr()`/`tas_page()`/`tas_set_speaker()`, `tas2505_configure()`, `tpw()`/`tpr()`, `hp_detect_connected()`, `HP_TIM_TEST` branch of `hp_codec_init()` | `0359372e11f61d74a85e2e4449178a5c62010664` | MIT, Copyright (c) 2026 chattock (`firmware/boards/LICENSES/Tape-Looper-MIT.txt`). The CS42L42 sequence in it is Tim Knapen's SP-1-dev wiki `I2C.md` (MIT, Copyright (c) 2026 Tim Knapen, `firmware/boards/LICENSES/Tim-Knapen-SP1-dev-MIT.txt`) | Register addresses/values kept; changed for hearing safety and pops: both outputs configured muted and unmuted only by the app, CS42L42 mixer -30 dB (was 0 dB), TAS2505 class-D gain +6 dB (was +18 dB), speaker attenuation -6 dB (was 0 dB), DAC muted before power-up, new mute/unmute helpers; restructured into functions without Tape Looper globals |
-| `firmware/boards/teenageengineering/stem_player/*` (8 files, unmodified) | chattock/sp1-tape-looper `boards/teenageengineering/stem_player` | `0359372e11f61d74a85e2e4449178a5c62010664` | MIT, Copyright (c) 2026 chattock (`firmware/boards/LICENSES/Tape-Looper-MIT.txt`). Kconfig/defconfig/yaml files carry `SPDX-License-Identifier: Apache-2.0` headers, kept as-is (`firmware/boards/LICENSES/Apache-2.0.txt`). | dts header: reconstructed from ericlewis/sp1-midi's board (MIT, licence text not reviewed/copied yet) and timknapen/SP-1-dev pin map + wiki (MIT, Copyright (c) 2026 Tim Knapen, `firmware/boards/LICENSES/Tim-Knapen-SP1-dev-MIT.txt`) |
+| `firmware/boards/teenageengineering/stem_player/*` (8 files, unmodified; byte-identical to the upstream blobs at that commit) | chattock/sp1-tape-looper `boards/teenageengineering/stem_player` | `0359372e11f61d74a85e2e4449178a5c62010664` | MIT, Copyright (c) 2026 chattock (`firmware/boards/LICENSES/Tape-Looper-MIT.txt`). The Kconfig and defconfig files carry `SPDX-License-Identifier: Apache-2.0` headers, kept as-is (`firmware/boards/LICENSES/Apache-2.0.txt`). | dts header: reconstructed from ericlewis/sp1-midi's board (MIT, Copyright (c) 2026 Eric Lewis, commit `43f5eae90d999a7defd9a20d06cd1bf4612fa235`, `firmware/boards/LICENSES/Eric-Lewis-sp1-midi-MIT.txt`) and timknapen/SP-1-dev pin map + wiki (MIT, Copyright (c) 2026 Tim Knapen, `firmware/boards/LICENSES/Tim-Knapen-SP1-dev-MIT.txt`) |
 
 `firmware/app/zephyr_tone/src/main.c` is new code; its I2S configuration (clock-slave, 16-bit, I2S format, prime-then-START,
 drop/re-prime failsafe), its init order (I2S, TAS2505, CS42L42) and its prj.conf USB device_next/CDC ACM settings follow Tape Looper's
@@ -16,11 +16,18 @@ Zephyr checkout, not copied). Nothing from softmodded/marisko or jackiscool12312
 `firmware/app/zephyr_min/src/main.c` is new code; its watchdog-feed and SYSTEM_OFF sequence follow
 the approach in sp1-tape-looper `tools/capacity422/runtime/src/main.c` (MIT) but no code was copied.
 
-Build-time dependencies (downloaded into `../toolchain`, not redistributed; pins in `firmware/west-lock.json`):
+Build-time dependencies (downloaded into `../toolchain`, not redistributed in source form; pins in `firmware/west-lock.json`):
 Zephyr v4.3.1 `75f67d76…` (Apache-2.0), cmsis `512cc7e8…` (Apache-2.0), cmsis_6 `30a859f4…` (Apache-2.0),
-hal_nordic `7858281d…` (BSD-3-Clause / mixed, see module), Zephyr SDK 0.17.4 arm-zephyr-eabi (GCC/binutils/newlib, GPL/LGPL/BSD tools; nothing copied).
-The built `zephyr.bin` links Zephyr (Apache-2.0), nrfx/MDK (BSD-3-Clause) and CMSIS (Apache-2.0) code; their notices must accompany any distributed image.
-No Infineon/Cypress Bluetooth SDK files or radio payloads are used.
+hal_nordic `7858281d…` (nrfx 3.14.0: BSD-3-Clause; four MDK `system_*` files Apache-2.0; the module's Zephyr glue and other
+parts are under other licences, including `LicenseRef-Nordic-5-Clause`, none of which is linked into zephyr_sp1fx),
+Zephyr SDK 0.17.4 arm-zephyr-eabi (GCC 12.2.0 and binutils, GPL; picolibc 1.8.10 and libgcc are linked into images, see below).
+
+**Binary images.** What the integrated firmware image actually links was read from its linker map (zephyr_sp1fx, v1-rc6):
+Zephyr (Apache-2.0), CMSIS_6 Core headers (Apache-2.0; the older `cmsis` module is not used), nrfx/MDK (BSD-3-Clause, four
+Apache-2.0 MDK files), picolibc 1.8.10 from the SDK (BSD-style licences, a Sun/SunPro notice, a Cygnus notice, Ryu under
+Apache-2.0 OR BSL-1.0), libgcc (GPL-3.0+ with the GCC Runtime Library Exception, no notice required) and the Tape Looper-derived
+code (MIT). The full licence texts and copyright lines are in **`docs/BINARY_NOTICES.md`**, which must be shipped with any
+published image. No Infineon/Cypress Bluetooth SDK files or radio payloads are used.
 
 ## Research references
 
@@ -33,24 +40,27 @@ Entries below are research references, pinned to the commit inspected.
 | jackiscool123123121/marisko | `315d50469ae0f1dd24f78bcb9b6a082879cf824d` | MIT | Driver structure reference |
 | softmodded/marisko | `b787d906c96db3f03b11860ec20f0b53441c266d` | **No license file. Do not copy** | Reference only |
 | jackiscool123123121/rome | `40023f9d03603c2db29d8adacd1281f3fd5ff71d` | MIT | Possible flashing tool |
-| timknapen/SP-1-dev (wiki) | wiki `d661d3f176c869c467e63a66f3fb89e24bb124d6` | MIT (repo) | Hardware docs and pin map |
+| timknapen/SP-1-dev (wiki) | wiki `d661d3f176c869c467e63a66f3fb89e24bb124d6`; repo licence checked at `af2c50315996dfe5c78725995dbe498790ad763c` | MIT, Copyright (c) 2026 Tim Knapen (text identical to `firmware/boards/LICENSES/Tim-Knapen-SP1-dev-MIT.txt`) | Hardware docs and pin map |
+| ericlewis/sp1-midi | `43f5eae90d999a7defd9a20d06cd1bf4612fa235` (the only commit) | MIT, Copyright (c) 2026 Eric Lewis (`firmware/boards/LICENSES/Eric-Lewis-sp1-midi-MIT.txt`) | Credited by the board devicetree (part of its source); nothing else used |
 | ARM-software/CMSIS-DSP | `9f64ba31591e527c505951943b4b95b0eb2f834b` | Apache-2.0 | Possible DSP primitives |
 | bnjreece/awesome-te | `02c9fb3c95b7fa4bae954be4d7ae795396d10e93` | see repo | Link index |
 
-Not reviewed: solderless.engineering terms, ericlewis/sp1-midi, reverbose.com page.
+Not reviewed: solderless.engineering terms, reverbose.com page (neither is used in or shipped with anything here).
 
 ## Bring-up apps added later (details in each app's NOTICES.md)
 
 - `firmware/app/zephyr_controls/NOTICES.md`: ladder/fader thresholds and LED/rail handling adapted from chattock/sp1-tape-looper `0359372e` (MIT).
 - `firmware/app/zephyr_sync/NOTICES.md`: MIDI/PO sync bit-banging approach adapted from chattock/sp1-tape-looper `0359372e` (MIT).
 - `firmware/app/zephyr_usbaudio/NOTICES.md`: UAC2/feedback approach adapted from chattock/sp1-tape-looper `0359372e` (MIT) and Zephyr samples (Apache-2.0).
+- `firmware/app/zephyr_sp1fx/NOTICES.md`: the integrated firmware; collects the credits above for the parts it is built from.
 
 ## Added with the integrated firmware (zephyr_sp1fx, rc1 onwards)
 
 This project's own code is MIT, Copyright (c) 2026 Alex Typaldos (see `LICENSE`).
 
 Adapted from chattock/sp1-tape-looper `0359372e11f61d74a85e2e4449178a5c62010664` (MIT, Copyright (c) 2026 chattock; full text in
-`firmware/boards/LICENSES/Tape-Looper-MIT.txt`). Each file below carries a comment naming its source:
+`firmware/boards/LICENSES/Tape-Looper-MIT.txt`). Each file below names its source in a comment, or (for `zephyr_sp1fx/src/main.c`
+and `saadc_scan.h`, which only reuse patterns or settings) in `firmware/app/zephyr_sp1fx/NOTICES.md`:
 
 | Path | What was taken |
 |---|---|
@@ -58,6 +68,8 @@ Adapted from chattock/sp1-tape-looper `0359372e11f61d74a85e2e4449178a5c62010664`
 | `firmware/drivers/controls_hw.c/.h` | fader/ladder/LED/rail handling, ported and restructured |
 | `firmware/drivers/midi_out.c/.h`, `firmware/drivers/sync_hw.c/.h` | MIDI and PO sync pin handling and timer approach, rewritten |
 | `firmware/drivers/saadc_scan.h` | same channel setup as the verified controls image (register-level scanner is new code) |
+| `firmware/audio/usb_audio_core.c/.h` | explicit-feedback law after `feedback_update()`, re-implemented with different gains |
+| `firmware/app/zephyr_sp1fx/src/main.c` | patterns only (watchdog feed, power-off order, charge standby, charger pins, I2S/codec init order); see its `NOTICES.md` |
 | `firmware/app/zephyr_tone/src/sp1_codecs.c/.h` | CS42L42 / TAS2505 initialisation (licence header kept in the file) |
 | `firmware/boards/teenageengineering/stem_player/*` | verbatim copy of the board definition |
 
@@ -68,11 +80,36 @@ reviewed and nothing from Clouds is used here.
 Hardware facts (pin map, codec/charger signals) come from timknapen/SP-1-dev (MIT; text in `firmware/boards/LICENSES/Tim-Knapen-SP1-dev-MIT.txt`)
 and from the Tape Looper source. The charger pin names and the battery divider ratio are taken from those sources and are not verified by measurement.
 
+## Published algorithms (own implementations, credited for their origin)
+
+The DSP, protocol and storage code is written for this project. It implements textbook methods; no third-party code was copied
+for them (the files named were reviewed before publication; no copied code was identified, but this is a source review, not a
+similarity scan):
+
+- `firmware/dsp/effects/filter.c`: state-variable filter in Vadim Zavalishin's topology-preserving-transform form
+  ("The Art of VA Filter Design").
+- `firmware/dsp/effects/reverb.c`: Schroeder allpass diffusers and a 4-line feedback delay network with Hadamard mixing (Stautner and
+  Puckette, Jot). Line lengths are this project's own primes; Tape Looper's Clouds-derived reverb was studied but not used.
+- `firmware/dsp/util.h`: rational (Padé-type) tanh approximation `x(27+x^2)/(27+9x^2)`, Marsaglia's xorshift32 noise generator,
+  a truncated Taylor series for exp2, and a quadratic log2 mantissa fit whose constants (`-0.34484843`, `2.02466578`, `-1.67487759`)
+  are widely published; their first source was not traced.
+- `firmware/protocol/protocol.c`, `companion/js/protocol.js`: COBS framing (Cheshire and Baker) and CRC-16/CCITT-FALSE.
+  `firmware/storage/config_store.c`: CRC-32 (IEEE 802.3, reflected polynomial `0xEDB88320`).
+
 ## Look-and-feel references (no assets copied)
 
 - `companion/` look and feel is modelled on the Tape Looper companion site (MIT, Copyright (c) 2026 chattock; `companion/LICENSES/Tape-Looper-MIT.txt`).
-- `docs/guide/` card-and-leader-line layout is modelled on the Marisko firmware guide. Only the layout idea is used; no artwork or text was copied.
-  Note: two Marisko repositories are listed above and only one has a licence file, so nothing from either was reused.
+- `docs/guide/` card-and-leader-line layout is modelled on the Marisko firmware guide image (`download.png` in jackiscool123123121/marisko
+  `315d5046`, a repository with an MIT licence file). Only the layout idea is used; no artwork or text was copied.
+  Note: two Marisko repositories are listed above and only one has a licence file, so no code, text or artwork from either was reused.
+
+## Fonts and external resources
+
+- `companion/index.html` and `companion/css/style.css` use system fonts only (`-apple-system`, `BlinkMacSystemFont`, `Helvetica Neue`,
+  Arial, `ui-monospace`/Menlo) and load nothing from the network; the favicon is an inline SVG data URI (a rounded square and a path), not an external file.
+- `docs/guide/sp1fx-guide.html` uses system fonts only (`Helvetica Neue`, Helvetica, Arial) and inline SVG (the device drawing, redrawn for this project per `docs/guide/README.md`); no external loads.
+- `docs/guide/sp1fx-guide.pdf` was printed from that HTML by headless Chrome on macOS and embeds subsets of the macOS system fonts
+  Helvetica Neue and Arial (font subsetting is how PDFs normally carry text). `docs/guide/sp1fx-guide.png` is a raster render with no fonts.
 
 ## Developer-only tools (not part of any firmware image, not redistributed)
 
@@ -82,7 +119,31 @@ and from the Tape Looper source. The charger pin names and the battery divider r
 
 ## Items to review before the repository is made public
 
-- `ericlewis/sp1-midi`: credited in the board devicetree header (MIT per Tape Looper's file); its licence text has not been reviewed or copied.
-- Confirm the copyright holder name in `LICENSE`, and that no personal paths or device identifiers remain in docs, logs or commit history.
-- Flash images are not committed (`/flash-ready` is outside git). If images are ever published they must ship with the Zephyr, nrfx and CMSIS notices.
-- Fonts or external resources used by the companion and the guide (check `companion/index.html` and `docs/guide/sp1fx-guide.html`).
+Resolved (2026-11-25 review, branch `public-ready`):
+
+- [x] `ericlewis/sp1-midi`: licence read at its only commit `43f5eae9` (MIT, Copyright (c) 2026 Eric Lewis); full text added as
+  `firmware/boards/LICENSES/Eric-Lewis-sp1-midi-MIT.txt` and referenced from `firmware/boards/LICENSES/NOTICE.txt`.
+- [x] Copyright holder: "Alex Typaldos" in `LICENSE`, this file and the binary notices; no other holder name is used for this
+  project's own code.
+- [x] Upstream licence texts: `Tape-Looper-MIT.txt` and `Tim-Knapen-SP1-dev-MIT.txt` are identical to the upstream files at the pinned
+  commits; the 8 board files are byte-identical to Tape Looper `0359372e`; `Apache-2.0.txt` is identical to Zephyr v4.3.1's `LICENSE`.
+- [x] Binary notices: `docs/BINARY_NOTICES.md` lists what zephyr_sp1fx actually links (from the linker map) with full licence texts
+  and copyright lines (Zephyr, CMSIS_6, nrfx/MDK, picolibc, libgcc, Tape Looper, SP-1-dev, sp1-midi).
+- [x] Fonts and external resources: system fonts only, no network loads (see "Fonts and external resources" above).
+- [x] Attribution comments: every file listed in this document names its source in a header comment or in its app's `NOTICES.md`;
+  the integrated firmware now has `firmware/app/zephyr_sp1fx/NOTICES.md`.
+- [x] Personal paths: none in the current tree (absolute home paths were removed in `bf9dd0b`; they remain in older commits, see below).
+
+Remaining (owner decisions or manual steps):
+
+- [ ] **Commit history** still contains a personal e-mail address as author/committer of 41 commits, a work address on the
+  `v1-rc6` tag and on local commits, the developer's home-directory paths in 15 commits before `bf9dd0b`, and `Claude-Session` links in
+  commit messages. Decide between publishing as is, rewriting authors and paths (`git filter-repo`), or publishing a fresh squashed
+  repository. Use a GitHub `noreply` address for future commits.
+- [ ] **Release v1-rc6** (`sp1fx-v1-rc6.bin`, `.elf`) has no notices attached. Upload `docs/BINARY_NOTICES.md` as a release asset (or
+  add it to the archive) before the repository becomes public. The published `.elf` contains the build machine's home-directory paths in
+  its debug information; rebuild with `-ffile-prefix-map` or do not publish the `.elf`.
+- [ ] `docs/guide/sp1fx-guide.pdf` embeds subsets of the macOS system fonts Helvetica Neue and Arial. Embedding is normal for PDFs, but
+  the font licences were not checked; re-print with an openly licensed font if that matters.
+- [ ] The research notes (`docs/research/`, `docs/PHASE0_REPORT.md`) quote short excerpts and line numbers from upstream sources; review
+  them once more if any upstream author objects.

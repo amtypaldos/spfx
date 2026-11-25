@@ -28,7 +28,8 @@ kept under firmware/boards/LICENSES/ and companion/LICENSES/. THIRD_PARTY_NOTICE
 lists every upstream source, its pinned commit and its licence.
 
 Built firmware images also contain Zephyr RTOS (Apache-2.0), Nordic nrfx/MDK
-(BSD-3-Clause) and CMSIS (Apache-2.0) code; their notices must accompany any
+(BSD-3-Clause), CMSIS (Apache-2.0) and picolibc/GCC runtime code from the
+Zephyr SDK; docs/BINARY_NOTICES.md holds their notices and must accompany any
 distributed image. This project is unofficial and is not affiliated with or
 endorsed by Teenage Engineering or Kano. No Bluetooth radio firmware or SDK
 payload is included.

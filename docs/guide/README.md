@@ -11,6 +11,8 @@ Regenerate (headless Chrome, run in this directory)
     "$C" --headless --no-pdf-header-footer --print-to-pdf=sp1fx-guide.pdf file://$PWD/sp1fx-guide.html
 
 Style
-Layout, palette, typography and callout-card style follow the MIT-licensed Marisko firmware guide image (card callouts with dotted leader lines to a flat device illustration, warm off-white background, single red accent). All artwork is redrawn from scratch; no pixels, text or branding are copied.
+Layout, palette, typography and callout-card style follow the Marisko firmware guide image (`download.png` in jackiscool123123121/marisko, commit `315d5046`, MIT): card callouts with dotted leader lines to a flat device illustration, warm off-white background, single red accent. Only the layout idea is used. All artwork is redrawn from scratch; no pixels, text or branding are copied. Nothing from softmodded/marisko (no licence) is used.
+
+Fonts: the HTML uses system fonts only ("Helvetica Neue", Helvetica, Arial, sans-serif) and loads nothing external. The PDF was printed on macOS and embeds subsets of the system fonts Helvetica Neue and Arial; the PNG has no embedded fonts.
 
 Status: development firmware. Not yet tested on hardware.

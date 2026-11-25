@@ -1,3 +1,8 @@
 build/
 *.wav
 .DS_Store
+# Local-only material that must never be committed (images, upstream clones, agent state)
+flash-ready/
+upstream/
+.claude/settings.local.json
+.claude/worktrees/
