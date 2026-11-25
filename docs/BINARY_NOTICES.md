@@ -17,6 +17,9 @@ from softmodded/marisko.
   `daabe9b3961c0b30d38230891b71ae7db819ff83cb3924093f0fa181b2a51597`, git tag
   `v1-rc6`). A local reproducible build (`build_firmware.sh --app sp1fx repro`)
   gives the same SHA-256 as the published asset.
+- Also applies to release **2026.11.25** (`sp1fx-2026.11.25.bin`, SHA-256
+  `74656b23c8982a4955c55b2e6af9d747599f4f46358577a39c6f57ab11fa0214`, tag `v2026.11.25`): its linker map lists
+  the same libraries (Zephyr, nrfx, picolibc, libgcc); the changes are in this project's own code.
 - Method: every input object that contributes bytes to a loadable section was
   read from the linker map (`zephyr/zephyr.map`) of that build and traced to its
   source file with `compile_commands.json`. Headers compiled into those objects
@@ -29,7 +32,7 @@ from softmodded/marisko.
 
 | Component | Version / pin | Licence | What is in the image |
 |---|---|---|---|
-| SP-1 FX (this repository) | tag `v1-rc6` | MIT | the application: DSP engine and effects, controls, protocol, storage, drivers |
+| SP-1 FX (this repository) | tags `v1-rc6`, `v2026.11.25` | MIT | the application: DSP engine and effects, controls, protocol, storage, drivers |
 | chattock/sp1-tape-looper | `0359372e11f61d74a85e2e4449178a5c62010664` | MIT | code adapted into `sp1_codecs.c`, `controls_hw.c`, `ladder.c`, `midi_out.c`, `sync_hw.c`; the SP-1 board definition (devicetree and Kconfig) |
 | timknapen/SP-1-dev | `af2c50315996dfe5c78725995dbe498790ad763c` | MIT | CS42L42 init sequence (through Tape Looper) and pin map used by the board definition |
 | ericlewis/sp1-midi | `43f5eae90d999a7defd9a20d06cd1bf4612fa235` | MIT | the board devicetree is reconstructed in part from its `stem_player` board (per the Tape Looper file header) |
