@@ -402,7 +402,7 @@ Line types (copy whole lines into your report):
   = move it down. Global bypass (PLAY): one LED walks across the four.
 - **PLAY-side LEDs** (between PLAY and FUNCTION), normally: output level meter (more LEDs =
   louder; all four bright = near full scale).
-  - After FN + FWD/REV: all four flash (0.25 s), then a **position bar** for 1.4 s:
+  - After FN + FWD/REV: all four flash rapidly (7 flashes, 0.7 s; rc4+), then a **position bar** for 1.4 s:
     Dub Station 1 LED, Boom Bap 1, House 2, Lo-Fi Tape 2, Ambient 3, Clean 4.
   - After VOL+/VOL-: a **volume bar** for 1.2 s: each LED is a quarter of the range, fully lit,
     partly lit (dimmer) or dark. At mute only LED 1 blinks dim.

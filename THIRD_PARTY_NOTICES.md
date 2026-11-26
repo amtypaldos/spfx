@@ -142,9 +142,8 @@ Resolved (2026-11-25 review, branch `public-ready`):
 
 Remaining (owner decisions or manual steps):
 
-- [ ] **Release v1-rc6** (`sp1fx-v1-rc6.bin`, `.elf`) had no notices attached when this list was written. Upload
-  `docs/BINARY_NOTICES.md` as a release asset (or add it to the archive); not confirmed whether this was done. The rc6 `.elf` contains
-  the build machine's home-directory paths in its debug information; remove it from the release or leave it as is (owner decision).
+- [x] **Release v1-rc6**: `BINARY_NOTICES.md` is attached as a release asset, and the `.elf` (home-directory paths in its debug
+  information) was removed from the release; `SHA256SUMS` and the notes were updated (2026-11-25).
 - [ ] `docs/guide/sp1fx-guide.pdf` embeds subsets of the macOS system fonts Helvetica Neue and Arial. Embedding is normal for PDFs, but
   the font licences were not checked; re-print with an openly licensed font if that matters.
 - [ ] The research notes (`docs/research/`, `docs/PHASE0_REPORT.md`) quote short excerpts and line numbers from upstream sources; review

@@ -252,8 +252,8 @@ Flash safety [SRC]: ADR-003 addresses re-verified against the board dts; slot0 s
 `check_image.py --reserve`. The brief's "0xFF000 area" was not used: ADR-003 explicitly keeps
 settings out of the board's `storage` page.
 
-Not done / open: device-side user presets (owner decision: companion only); the guide PNG/PDF
-still say "16 steps" (HTML updated); Windows; latency measurement.
+Not done / open: device-side user presets (owner decision: companion only); Windows; latency measurement.
+(The guide PNG/PDF were re-rendered for 2026.11.25 and match the firmware.)
 
 
 ## What exists
