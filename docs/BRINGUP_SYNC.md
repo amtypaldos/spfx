@@ -1,6 +1,11 @@
 # Bring-up image: SYNC jack (MIDI clock + Pocket Operator sync)
 
-Status labels follow AGENTS.md.
+Status: bring-up record. The sync image later ran on the owner's unit (2026-11-24 [HW], serial log only, no gear:
+`docs/STATUS.md`, "Hardware log"). The same driver is in the integrated firmware. Sync with real external gear is not
+separately confirmed (the owner's 2026-11-25 report says everything was tested, without sync details). Not published
+as a release; rebuild it from source.
+
+Status labels follow AGENTS.md. When written:
 **The image has been built and checked, but it has never run on an SP-1 (untested). Nothing on this
 page has been observed on hardware.** The transmitter core is tested in simulation
 (`tests/test_midi_out.c`). Tape Looper, where the pin map comes from, also calls its MIDI/PO

@@ -2,6 +2,9 @@
 
 Status: **FEASIBILITY GATE NOT PASSED for analog input.** No firmware has been written and no device has been touched.
 
+(Record of 2026-11-23/24, written before any firmware. The no-analog-input finding still stands and shaped the routing
+decision in `ADR-001-audio-routing.md`. Firmware has since been written and run on the owner's SP-1; see `docs/STATUS.md`.)
+
 Evidence labels used throughout:
 - **[SRC]** read in upstream source/docs (not independently verified on hardware by us)
 - **[CALC]** our own arithmetic/estimate

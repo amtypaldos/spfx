@@ -1,23 +1,29 @@
 # SP-1 FX v1: integrated firmware bring-up (2026.11.25 current)
 
-## 2026.11.25 = rc6 + companion feature list -- NOT RUN ON HARDWARE
+## 2026.11.25 = rc6 + companion feature list -- works decently well, some minor bugs [HW, owner report]
 
 | | |
 |---|---|
-| File | `sp1fx-2026.11.25.bin` (ELF: `sp1fx-2026.11.25.elf`), GitHub release `v2026.11.25` |
+| File | `sp1fx-2026.11.25.bin` (ELF: `sp1fx-2026.11.25.elf`), GitHub release [`v2026.11.25`](https://github.com/amtypaldos/spfx/releases) (owner: also in `flash-ready/`) |
 | SHA-256 | `74656b23c8982a4955c55b2e6af9d747599f4f46358577a39c6f57ab11fa0214` (in the release's `SHA256SUMS`) |
 | Size | 153,644 B at 0x20000, `check_image.py` PASS, two clean builds identical |
 
+**Owner report (by chat, 2026-11-25):** "Everything has been tested and it's a little buggy but works decently
+well." The owner did not name the image; it is recorded as this one, the latest. The bugs are not itemised yet and
+no console log is recorded, so the stages below have no per-step results. Sync with external gear is not
+separately confirmed (Stage 4). Levels stay calculated, the battery % uncalibrated.
+
 The device behaves like rc6 (same tests below). New: the companion's Firmware tile shows `sp1fx-2026.11.25`
-and nothing is grayed out. With rc6 on the device, this companion also works (it assumes rc6 features). Report
-if any control is grayed out or a "needs newer firmware" note appears with this image.
+and nothing is grayed out. With rc6 on the device, this companion also works (it assumes rc6 features; host-tested,
+not separately confirmed on hardware). Report if any control is grayed out or a "needs newer firmware" note
+appears with this image.
 
 
-## rc6 (2026-11-24) = rc5 + battery fuel gauge -- NOT RUN ON HARDWARE
+## rc6 (2026-11-24) = rc5 + battery fuel gauge -- NOT RUN ON HARDWARE (superseded by 2026.11.25)
 
 | | |
 |---|---|
-| File | `flash-ready/sp1fx-v1-rc6.bin` (ELF: `sp1fx-v1-rc6.elf`) |
+| File | `sp1fx-v1-rc6.bin` (ELF: `sp1fx-v1-rc6.elf`), GitHub release `v1-rc6` (owner: `flash-ready/`) |
 | SHA-256 | `daabe9b3961c0b30d38230891b71ae7db819ff83cb3924093f0fa181b2a51597` (in `SHA256SUMS`) |
 | Size | 153,592 B at 0x20000, `check_image.py` PASS, two clean builds identical; companion from the same commit |
 
@@ -47,7 +53,7 @@ if any control is grayed out or a "needs newer firmware" note appears with this 
 
 # rc5 (superseded by rc6)
 
-## rc5 (2026-11-24) = rc4 + safer jack levels + feedback saturation -- NOT RUN ON HARDWARE
+## rc5 (2026-11-24) = rc4 + safer jack levels + feedback saturation -- worked on hardware [HW, owner]
 
 | | |
 |---|---|
@@ -161,7 +167,7 @@ bar for 1.4 s. The refused pattern (alternating pairs) is unchanged and differen
 
 # rc3 (superseded by rc4)
 
-## rc3 (2026-11-24) -- NOT RUN ON HARDWARE
+## rc3 (2026-11-24) -- ran on hardware [HW]: controls fixed, starvation near-misses (see rc4)
 
 | | |
 |---|---|
@@ -248,7 +254,7 @@ controls ever die again, copy those lines.
 
 # rc2 (superseded by rc3)
 
-## rc2 (2026-11-24): fixes for the rc1 watchdog resets -- NOT RUN ON HARDWARE
+## rc2 (2026-11-24): fixes for the rc1 watchdog resets -- ran on hardware [HW]: steady, controls dead in some boots (see rc3)
 
 | | |
 |---|---|
@@ -316,7 +322,10 @@ How to read the lines (for the lead):
 
 # rc1 (superseded by rc2; kept for reference)
 
-**Status: built, host-tested, NOT RUN ON HARDWARE.** Nothing in this image has been on an
+**Result on hardware [HW]: rc1 reset by watchdog every ~6-20 s; fixed in rc2.** The stages
+below are still the test plan for later images.
+
+Status when written: **built, host-tested, NOT RUN ON HARDWARE.** Nothing in this image had been on an
 SP-1 yet. It combines parts that were hardware-verified separately (USB audio + engine v3,
 controls, codecs) with parts that have only been host-tested (protocol over USB, settings
 journal on real flash, volume buttons, windowed overload guard) or never tested with gear
@@ -333,7 +342,8 @@ journal on real flash, volume buttons, windowed overload guard) or never tested 
 
 ## Safety first
 
-- Check the file: `cd flash-ready && shasum -a 256 -c SHA256SUMS`.
+- Check the file: in the folder with the release's `SHA256SUMS` (a GitHub release download, or the owner's
+  `flash-ready/`), run `shasum -a 256 -c SHA256SUMS`.
 - Flash with Solderless as before (T1 + T4 while connecting USB, release when T1 lights).
 - **Start with headphones off your ears and the Mac's app volume low.** This image is louder
   than the usbaudio images: the fixed output trim is now -6 dB (was -12 dB), and VOL+ goes to
@@ -350,7 +360,8 @@ journal on real flash, volume buttons, windowed overload guard) or never tested 
 The CDC ACM port carries two things. The scheme:
 
 1. When a program opens the port (DTR high, e.g. `screen`), the device prints **text**:
-   a banner line `I SP-1 FX sp1fx-v1-rc1 ...`, then every 2 s a short diagnostic block, plus
+   a banner line `I SP-1 FX sp1fx-2026.11.25 ...` (the image's version), then every 2 s a short
+   diagnostic block (off by default from rc4 on; `d` toggles it), plus
    one line per event. Event lines are limited to 10/s (bursts of 20); extra lines are
    counted (`ev_drop=`) and dropped.
 2. The first **valid protocol frame** from the host (the companion's HELLO) switches the port
@@ -391,7 +402,7 @@ Line types (copy whole lines into your report):
   = move it down. Global bypass (PLAY): one LED walks across the four.
 - **PLAY-side LEDs** (between PLAY and FUNCTION), normally: output level meter (more LEDs =
   louder; all four bright = near full scale).
-  - After FN + FWD/REV: all four flash (0.25 s), then a **position bar** for 1.4 s:
+  - After FN + FWD/REV: all four flash rapidly (7 flashes, 0.7 s; rc4+), then a **position bar** for 1.4 s:
     Dub Station 1 LED, Boom Bap 1, House 2, Lo-Fi Tape 2, Ambient 3, Clean 4.
   - After VOL+/VOL-: a **volume bar** for 1.2 s: each LED is a quarter of the range, fully lit,
     partly lit (dimmer) or dark. At mute only LED 1 blinks dim.
@@ -414,15 +425,15 @@ current volume** and the sync on/off state; it sets the preset's tempo.
 
 ## Stage 0: boot, watchdog, power off (2 min)
 
-1. Flash `sp1fx-v1-rc1.bin`. Unplug/replug USB (or press FUNCTION if dark).
+1. Flash the image under test. Unplug/replug USB (rc3 and later: hold FUNCTION 4 s if it stays dark or shows
+   the charge display).
 2. Expect: the Mac sees an audio output "SP-1 FX" and a serial port. Track LEDs dark,
    PLAY-side LEDs dark (no audio yet).
 3. Open the console. Report the `I` line and the first `D`/`usb`/`threads` block. Expect
    `store_load=-1` on the very first boot, `cs42=ok tas=ok` in the `info` line, `i2s blk/s=750`.
 4. Wait 30 s: no reset (the `D t=` counter keeps rising, `boots=` in `info` stays the same).
-5. Hold FUNCTION 4 s (rc3; 8-LED fill): `POWER OFF` line, LEDs off. Press FUNCTION: the bootloader starts the
-   app again (as with the earlier images; with USB plugged in it may stay dark until FUNCTION
-   is pressed or USB is replugged, a known issue).
+5. Hold FUNCTION 4 s (rc3; 8-LED fill): `POWER OFF` line, LEDs off (with USB plugged in: the charge
+   display). Hold FUNCTION 4 s again: the unit starts (rc3 and later; rc1/rc2 started on a FUNCTION press).
 
 **Pass:** boots, no reset for 30 s, powers off and back on.
 
@@ -477,7 +488,7 @@ LED flash + bar; one Clean.
 3. Change things from the companion (an effect, wet, a parameter, BPM 100) and on the device
    (fader, VOL, FN + rocker): both sides stay in sync (device changes appear in the companion).
 4. **Persistence:** make a distinctive change (e.g. slot 1 = Bitcrusher, wet 70 %, volume
-   2 presses down), wait 5 s, then FN hold 4 s (power off) and FUNCTION to power on.
+   2 presses down), wait 5 s, then FN hold 4 s (power off) and FN hold 4 s again to power on.
    Reconnect: the state must be restored. Also try: change something, wait 5 s, unplug USB
    (hard power loss if the battery is flat; otherwise just replug) and check again.
 5. Open `screen` again (companion closed). In the `store` line report `saves= erases=
@@ -490,7 +501,8 @@ glitch at any save.
 
 ## Stage 4: sync jack (last; default OFF)
 
-The sync driver is **untested with real gear**. It stays completely off (jack pins untouched,
+The sync driver is **not separately confirmed with real gear** (the owner reports everything tested,
+2026-11-25, with no sync details; the sync image's serial log is the only sync evidence). It stays completely off (jack pins untouched,
 no 31 kHz timer interrupt) until switched on from the companion, and the on/off state is
 saved, so an "on" survives a power cycle.
 
@@ -589,13 +601,16 @@ another fader is touched (would show as `K` lines or wet changes on faders 3/4),
 bootloader-started PWM still driving those pins before our init. This image prints every
 takeover state change as a `K` line; please report them if it happens.
 
-### Known risks (not verifiable without hardware)
+### Known risks (written for rc1; see `docs/STATUS.md` for what hardware has shown since)
 
 - CPU: v3 presets measured ~50 % on hardware; the controls loop, protocol, thread statistics
   and the LED meter add an estimated 2-4 % (main thread at lower priority, plus config copies
   while faders move). Sync on adds an estimated 4-6 % (bit-timer interrupts). Unmeasured.
-- The CDC port now also receives (protocol); RX was never exercised on hardware.
-- Flash write/erase timing and the bootloader's behaviour towards 0xFD000-0xFEFFF.
+- The CDC port now also receives (protocol); RX was never exercised on hardware when this was
+  written. Later: the companion works over it [HW, owner report 2026-11-25].
+- Flash write/erase timing and the bootloader's behaviour towards 0xFD000-0xFEFFF. Later: saves
+  ran on hardware from rc1 on (rc3: up to 1.8 s, which led to rc4's stepped saves) [HW]; whether a
+  reflash wipes the settings is still not recorded.
 - The 0x00 separator relies on the companion's COBS decoder dropping the first bad frame
   (host-tested with the C parser; the JS decoder works the same way).
 - Sync jack: timing jitter ~1.3 ms (clock counted in rendered audio blocks, polled every 1 ms).

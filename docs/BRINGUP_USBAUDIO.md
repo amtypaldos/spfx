@@ -1,6 +1,11 @@
 # USB audio bring-up images: computer audio through the FX engine
 
-Status: **built, never run on hardware.** Everything below about behaviour is
+Status: bring-up record, superseded by the integrated firmware (see `BRINGUP_SP1FX.md`). Image A v1, v2
+and v3 later ran on the owner's unit with a Mac [HW]: v1 crashed on the first preset change, v2 overloaded on
+every effect preset, v3 ran the presets at about 50 % CPU (`docs/STATUS.md`, "Hardware log"). Image B (v1, v2)
+has no reported result. These images are not published as releases; rebuild them from source.
+
+Status when written: **built, never run on hardware.** Everything below about behaviour is
 *expected*, not observed. Only the tone image (`zephyr_tone`) has run on an SP-1.
 
 | Image | File in `flash-ready/` | App dir | USB product / PID |
@@ -326,7 +331,10 @@ hash; both need the build-script owner's decision.
 - Both use the same VID with different PIDs, so Windows will not mix their cached
   descriptors.
 
-## iPhone / iPad / Android (untested)
+## iPhone / iPad / Android (untested when written)
+
+Later: an iPhone works as a USB audio host (owner report; date and image not recorded). iPad and Android are
+still untested.
 
 - iOS/iPadOS: needs Apple's Lightning-to-USB 3 Camera Adapter (Lightning) or a USB-C
   port/adapter, and the SP-1 is battery powered, so it should not need power from
