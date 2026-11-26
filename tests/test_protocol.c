@@ -1035,6 +1035,26 @@ static void test_sync_clock_switch(void)
 	CHECK(e.stop == 1);
 }
 
+/* device-side level change (VOL+/VOL- hold, jack plug): EVENT SET_MASTER then EVENT SET_OUTPUT_MODE */
+static void test_device_out_mode_event(void)
+{
+	setup();
+	hold(0, 40);
+	clear_tx();
+	engine_set_master(&eng, 0.25f);
+	proto_device_out_mode(&pr, 2);
+	CHECK(pr.out_mode == 2);
+	CHECK(count_type(PT_EVENT) == 2);
+	CHECK(nfr == 2 && frames[0].type == PT_EVENT && frames[0].pay[0] == PT_SET_MASTER && frames[0].len == 3);
+	CHECK(g16(frames[0].pay + 1) == (uint16_t)(0.25f * 65535.0f + 0.5f));
+	CHECK(frames[1].type == PT_EVENT && frames[1].seq == 0 && frames[1].len == 2 &&
+	      frames[1].pay[0] == PT_SET_OUTPUT_MODE && frames[1].pay[1] == 2);
+	/* out-of-range mode: headphones */
+	clear_tx();
+	proto_device_out_mode(&pr, 9);
+	CHECK(pr.out_mode == 0 && nfr == 2 && frames[1].pay[1] == 0);
+}
+
 int main(void)
 {
 	RUN(test_crc16);
@@ -1055,6 +1075,7 @@ int main(void)
 	RUN(test_subscribe_timing);
 	RUN(test_output_mode);
 	RUN(test_output_mode_needs_cap);
+	RUN(test_device_out_mode_event);
 	RUN(test_meters_content);
 	RUN(test_factory_reset);
 	T_DONE();

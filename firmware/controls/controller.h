@@ -55,6 +55,10 @@ typedef struct {
 	uint32_t vol_until;  /* VOL+/VOL- pressed: show the volume bar on the PLAY-side LEDs until then */
 
 	int power_off_request;
+	int out_level_request; /* VOL+ and VOL- held: the app switches the level, clears this and calls
+	                        * controller_show_out_level (or sets err_until to refuse) */
+	int out_level_on, out_level_shown;
+	uint32_t out_level_t0;
 	uint32_t change_seq; /* increments on any user-visible state change (companion / persistence) */
 	uint32_t last_change_ms;
 
@@ -88,6 +92,13 @@ void controller_set_presets(controller_t *c, int count, int (*fill)(void *ctx, i
 #define PRESET_FLASH_MS 700u
 #define PRESET_FLASH_HALF_MS 50u
 #define PRESET_BAR_MS (PRESET_FLASH_MS + 1400u)
+/* Output level changed by VOL+ and VOL- held together: the four PLAY-side LEDs flash like a
+ * preset load (7 flashes in OUT_LEVEL_FLASH_MS), then a bar shows the new level by loudness
+ * (Headphones 1 LED, Loud 2, Line out 3) until OUT_LEVEL_BAR_MS. */
+#define OUT_LEVEL_FLASH_MS 700u
+#define OUT_LEVEL_FLASH_HALF_MS 50u
+#define OUT_LEVEL_BAR_MS (OUT_LEVEL_FLASH_MS + 1400u)
+void controller_show_out_level(controller_t *c, uint32_t now_ms, int mode);
 /* Pop the oldest device-originated event; returns 0 if none. */
 int controller_pop_event(controller_t *c, ctl_event_t *out);
 void controller_leds(const controller_t *c, uint32_t now_ms, led_frame_t *out);

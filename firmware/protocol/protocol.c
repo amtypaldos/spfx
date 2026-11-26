@@ -584,3 +584,15 @@ void proto_tick(proto_t *p, uint32_t now_ms)
 		}
 	}
 }
+
+void proto_device_out_mode(proto_t *p, uint8_t mode)
+{
+	p->out_mode = mode <= 2 ? mode : 0;
+	if (p->c.eng) {
+		uint16_t q = q16(p->c.eng->cfg.master);
+		uint8_t pm[2] = {(uint8_t)q, (uint8_t)(q >> 8)};
+		send_event(p, PT_SET_MASTER, pm, 2);
+	}
+	uint8_t pl[1] = {p->out_mode};
+	send_event(p, PT_SET_OUTPUT_MODE, pl, 1);
+}

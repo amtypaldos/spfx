@@ -91,6 +91,7 @@ int gesture_update(gesture_t *g, uint16_t mask, uint32_t now, gesture_event_t *e
 	if ((released & BTN_BIT(BTN_REV)) && g->rk_dir == -1) g->rk_dir = 0;
 	if ((released & BTN_BIT(BTN_VOLUP)) && g->vol_dir == 1) g->vol_dir = 0;
 	if ((released & BTN_BIT(BTN_VOLDN)) && g->vol_dir == -1) g->vol_dir = 0;
+	if (released & (BTN_BIT(BTN_VOLUP) | BTN_BIT(BTN_VOLDN))) g->vol_both = 0;
 
 	/* ---- presses ---- */
 	/* any other button pressed while FN is down makes this FN press a combination:
@@ -163,6 +164,17 @@ int gesture_update(gesture_t *g, uint16_t mask, uint32_t now, gesture_event_t *e
 		g->vol_next = now + GESTURE_VOL_DELAY_MS;
 		emit(ev, &n, GE_VOL, dir, 0);
 	}
+	/* VOL+ and VOL- together: the two single steps cancel out, the repeat stops, and holding
+	 * both for GESTURE_VOL_BOTH_MS asks for the next output level */
+	{
+		const uint16_t both = (uint16_t)(BTN_BIT(BTN_VOLUP) | BTN_BIT(BTN_VOLDN));
+		if ((pressed & both) && (mask & both) == both) {
+			g->vol_both = 1;
+			g->vol_both_sent = 0;
+			g->vol_both_t = now;
+			g->vol_dir = 0;
+		}
+	}
 
 	/* ---- timed behaviour ---- */
 	if (g->rk_dir != 0 && g->rk_slot >= 0 && g->chan_down[g->rk_slot] && now >= g->rk_next) {
@@ -179,6 +191,10 @@ int gesture_update(gesture_t *g, uint16_t mask, uint32_t now, gesture_event_t *e
 		emit(ev, &n, GE_VOL, g->vol_dir, 0);
 		g->vol_next += GESTURE_VOL_REPEAT_MS;
 		if (g->vol_next <= now) g->vol_next = now + GESTURE_VOL_REPEAT_MS;
+	}
+	if (g->vol_both && !g->vol_both_sent && (now - g->vol_both_t) >= GESTURE_VOL_BOTH_MS) {
+		g->vol_both_sent = 1;
+		emit(ev, &n, GE_OUT_LEVEL, 0, 0);
 	}
 	if (g->fn_down && !g->fn_consumed && !g->fn_long_sent && (now - g->fn_t) >= GESTURE_FN_LONG_MS) {
 		g->fn_long_sent = 1;

@@ -2,13 +2,34 @@
 
 Evidence key: **[HW]** observed on the owner's SP-1 (owner-run; see the hardware log). **[HOST]** verified by automated tests on a development Mac. **[SRC]** from upstream source/docs or our own build output. **[UNTESTED]** built but never run. **[TODO]** not started. **[HW, owner report]** is the owner's summary by chat, with no console log or itemised results recorded.
 
-**Current state (2026-11-25):** the current release is `v2026.11.25` (GitHub release). Owner report: the integrated
-firmware (latest image) and the companion work decently well, with some minor bugs that are not yet itemised
+**Current state (2026-11-25):** the newest release is `v2026.11.25.2` (GitHub pre-release, NOT RUN ON HARDWARE: adds the
+VOL+/VOL- hold for the jack level). The owner report below is for `v2026.11.25`: the integrated
+firmware (that image) and the companion work decently well, with some minor bugs that are not yet itemised
 [HW, owner report]. Not covered by that report and unchanged: sync with external gear (not separately confirmed),
 image B (USB audio return to host, a separate bring-up image), Windows (expected not to work), and every calculated or
 uncalibrated value (jack levels, battery %, declared effect CPU costs).
 
-## 2026.11.25 (current release) -- works decently well, some minor bugs [HW, owner report]
+## 2026.11.25.2 (newest, pre-release) -- NOT RUN ON HARDWARE
+
+`sp1fx-2026.11.25.2.bin`, SHA-256 `82eda0052c157e5242497d4d62065a6aaa6c6ab2c4c27f7059dc112e969ad0b8`,
+154,364 B, check PASS, reproducible, 0 warnings; host suites pass, companion 63/63.
+
+= 2026.11.25 plus (owner request):
+- **Jack level from the buttons** [HOST]: hold VOL+ and VOL- together for 3 s to step the headphone-jack level
+  Headphones -> Loud -> Line out -> Headphones. The four PLAY-side LEDs flash (7 flashes, 0.7 s, like a preset load),
+  then show the level for 1.4 s: 1 LED Headphones, 2 Loud, 3 Line out. One step per hold. While both are held the
+  volume does not repeat, and the two single presses cancel out (except at the ends of the range, where one of them
+  has no effect: at 0 dB the result is 2 dB quieter).
+  - Hearing safety unchanged: every boot still starts at Headphones; a louder level lowers the master by the
+    difference (15 or 36 dB) first, as for the companion.
+  - Only with something plugged into the jack. On the speaker the level has no effect (and plugging in returns to
+    Headphones), so the hold is refused with the alternating-pairs pattern.
+- **Companion follows device-side level changes** [HOST]: the device sends EVENT SET_MASTER then EVENT
+  SET_OUTPUT_MODE after the hold and after the jack-plug return to Headphones (before, the companion's level menu
+  stayed stale after a jack plug-in until the next GET_STATE). Spec: `docs/PROTOCOL.md`.
+- Guide image updated (Volume and Jacks cards, LED meanings).
+
+## 2026.11.25 -- works decently well, some minor bugs [HW, owner report]
 
 `sp1fx-2026.11.25.bin`, SHA-256 `74656b23c8982a4955c55b2e6af9d747599f4f46358577a39c6f57ab11fa0214`,
 153,644 B, check PASS, reproducible, 0 warnings; host suites pass, companion 62/62.
