@@ -297,3 +297,15 @@ test('SET_SYNC round trip and validation', () => {
   const bad = encodeFrame({ type: T.SET_SYNC, seq: 1, payload: Uint8Array.of(2) });
   assert.equal(parseFrame(decodeFrame(bad.subarray(0, bad.length - 1))).ok, false);
 });
+
+test('device-side level change (VOL+/VOL- hold): EVENT SET_MASTER then SET_OUTPUT_MODE update the model', async () => {
+  const { createModel, applySetter } = await import('../js/state.js');
+  const m = createModel();
+  // payloads exactly as firmware proto_device_out_mode sends them: setter type + setter payload
+  const evMaster = decodePayload(T.EVENT, new Uint8Array([T.SET_MASTER, 0xFF, 0x3F]));
+  const evMode = decodePayload(T.EVENT, new Uint8Array([T.SET_OUTPUT_MODE, 2]));
+  applySetter(m, evMaster.setter);
+  applySetter(m, evMode.setter);
+  assert.equal(m.outMode, 2);
+  assert.ok(Math.abs(m.master - 0x3FFF / 65535) < 1e-6);
+});

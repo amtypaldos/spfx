@@ -23,7 +23,7 @@ parts are under other licences, including `LicenseRef-Nordic-5-Clause`, none of 
 Zephyr SDK 0.17.4 arm-zephyr-eabi (GCC 12.2.0 and binutils, GPL; picolibc 1.8.10 and libgcc are linked into images, see below).
 
 **Binary images.** What the integrated firmware image actually links was read from its linker map (zephyr_sp1fx, v1-rc6; release
-2026.11.25 links the same libraries, see `docs/BINARY_NOTICES.md`):
+2026.11.25 and 2026.11.25.2 link the same libraries, see `docs/BINARY_NOTICES.md`):
 Zephyr (Apache-2.0), CMSIS_6 Core headers (Apache-2.0; the older `cmsis` module is not used), nrfx/MDK (BSD-3-Clause, four
 Apache-2.0 MDK files), picolibc 1.8.10 from the SDK (BSD-style licences, a Sun/SunPro notice, a Cygnus notice, Ryu under
 Apache-2.0 OR BSL-1.0), libgcc (GPL-3.0+ with the GCC Runtime Library Exception, no notice required) and the Tape Looper-derived

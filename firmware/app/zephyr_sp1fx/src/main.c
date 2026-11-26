@@ -2296,6 +2296,25 @@ int main(void)
 		if (ui.power_off_request) {
 			power_off();
 		}
+		/* VOL+ and VOL- held 3 s (2026.11.25.2): next headphone-jack level. Only with something
+		 * in the jack: the level does not affect the speaker, and plugging in returns to
+		 * Headphones anyway, so on the speaker it is refused (alternating-pairs pattern).
+		 * set_out_mode lowers the master when the level goes up, so nothing jumps. */
+		if (ui.out_level_request) {
+			ui.out_level_request = 0;
+			if (cur_out == OUT_HP) {
+				const uint8_t next = (uint8_t)vol_next_out_mode(g_out_mode);
+
+				set_out_mode(next);
+				proto_device_out_mode(&proto, next);
+				controller_show_out_level(&ui, now, next);
+				EV_PRINTF("C %u VOL+/-: level -> %s\r\n", now,
+					  next == OUT_MODE_LINE ? "LINE" : next == OUT_MODE_LOUD ? "LOUD" : "hp");
+			} else {
+				ui.err_until = now + 700u;
+				EV_PRINTF("C %u VOL+/-: nothing in the jack, level unchanged\r\n", now);
+			}
+		}
 		if (ui.preset_flash_until != sh.preset_flash) {
 			/* a preset was loaded: the guard gives it a fresh chance */
 			engine_overload_clear(&eng);
@@ -2377,6 +2396,7 @@ int main(void)
 						 * back to Headphones first (refusal LED pattern) */
 						if (c == 1 && hp_in == 0 && g_out_mode != OUT_MODE_HP) {
 							set_out_mode(OUT_MODE_HP);
+							proto_device_out_mode(&proto, OUT_MODE_HP);
 							ui.err_until = now + 700u;
 							EV_PRINTF("C %u jack plugged: level back to Headphones\r\n", now);
 						}

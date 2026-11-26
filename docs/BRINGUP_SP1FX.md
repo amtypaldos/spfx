@@ -1,4 +1,26 @@
-# SP-1 FX v1: integrated firmware bring-up (2026.11.25 current)
+# SP-1 FX v1: integrated firmware bring-up (2026.11.25.2 newest)
+
+## 2026.11.25.2 = 2026.11.25 + jack level from VOL+/VOL- -- NOT RUN ON HARDWARE
+
+| | |
+|---|---|
+| File | `sp1fx-2026.11.25.2.bin` (ELF: `sp1fx-2026.11.25.2.elf`), GitHub pre-release [`v2026.11.25.2`](https://github.com/amtypaldos/spfx/releases) |
+| SHA-256 | `82eda0052c157e5242497d4d62065a6aaa6c6ab2c4c27f7059dc112e969ad0b8` (in the release's `SHA256SUMS`) |
+| Size | 154,364 B at 0x20000, `check_image.py` PASS, two clean builds identical |
+
+Everything from 2026.11.25 is unchanged (tests below). New test, **at low volume, headphones on the desk first**:
+1. Boot, plug headphones into the jack. Play audio quietly. Hold VOL+ and VOL- together.
+   Expected: nothing for 3 s (the volume bar may show briefly, the volume does not run away), then the four LEDs
+   beside PLAY flash rapidly, then 2 LEDs (Loud) for about 1.4 s. The volume is lowered by 15 dB, so the sound at the
+   jack does not get louder at that moment. Console: `C <ms> VOL+/-: level -> LOUD`.
+2. Release and hold again: 3 LEDs (Line out), volume lowered by a further 21 dB. Again: 1 LED (Headphones), quieter.
+3. Keep holding past the confirmation: no second step until you release and hold again.
+4. Unplug the headphones (speaker) and hold both: the alternating-pairs refusal pattern, level unchanged.
+   Console: `C <ms> VOL+/-: nothing in the jack, level unchanged`.
+5. With the companion connected: its Level menu and volume slider follow each step. Plugging headphones in while at
+   Loud/Line out: the device returns to Headphones and the companion's menu now follows too.
+6. Power off and on: the level is Headphones again (every boot).
+
 
 ## 2026.11.25 = rc6 + companion feature list -- works decently well, some minor bugs [HW, owner report]
 

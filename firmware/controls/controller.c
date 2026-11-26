@@ -156,6 +156,9 @@ static void handle(controller_t *c, const gesture_event_t *ev, uint32_t now)
 	case GE_POWER_OFF:
 		c->power_off_request = 1;
 		break;
+	case GE_OUT_LEVEL:
+		c->out_level_request = 1;
+		break;
 	default:
 		break;
 	}
@@ -334,6 +337,24 @@ static void vol_bar(float m, uint32_t now, uint8_t play[4])
 	}
 }
 
+void controller_show_out_level(controller_t *c, uint32_t now, int mode)
+{
+	c->out_level_on = 1;
+	c->out_level_shown = mode;
+	c->out_level_t0 = now;
+}
+
+static void out_level_leds(const controller_t *c, uint32_t now, uint8_t play[4])
+{
+	const uint32_t dt = now - c->out_level_t0;
+	if (dt < OUT_LEVEL_FLASH_MS) {
+		for (int i = 0; i < 4; i++) play[i] = ((dt / OUT_LEVEL_FLASH_HALF_MS) & 1u) ? 0 : 255;
+		return;
+	}
+	const int lit = c->out_level_shown == OUT_MODE_LINE ? 3 : c->out_level_shown == OUT_MODE_LOUD ? 2 : 1;
+	for (int i = 0; i < 4; i++) play[i] = i < lit ? 255 : 0;
+}
+
 int controller_poweroff_countdown(const controller_t *c, uint32_t now)
 {
 	const gesture_t *g = &c->gest;
@@ -362,4 +383,7 @@ void controller_leds(const controller_t *c, uint32_t now, led_frame_t *o)
 	int showing_select = c->held_slot >= 0 && (c->selecting || now - c->held_since > 250u) && c->mode == UI_PERFORM;
 	if (c->vol_until != 0u && (int32_t)(c->vol_until - now) > 0 && !showing_select && now >= c->err_until)
 		vol_bar(c->eng->cfg.master, now, o->play);
+	/* output-level confirmation wins over the volume bar the two VOL presses started */
+	if (c->out_level_on && now - c->out_level_t0 < OUT_LEVEL_BAR_MS)
+		out_level_leds(c, now, o->play);
 }

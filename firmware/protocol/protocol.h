@@ -145,5 +145,9 @@ void proto_rx(proto_t *p, const uint8_t *bytes, size_t n);
 /* Control-thread tick: drains device events from the controller (rate-limited) and emits
  * METERS at the subscribed rate. */
 void proto_tick(proto_t *p, uint32_t now_ms);
+/* The device changed the headphone-jack level itself (VOL+/VOL- hold, jack plug-in) after the
+ * app applied it (master already lowered): records it and sends EVENT SET_MASTER (current
+ * master) then EVENT SET_OUTPUT_MODE. Out-of-range modes are sent as headphones. */
+void proto_device_out_mode(proto_t *p, uint8_t mode);
 
 #endif

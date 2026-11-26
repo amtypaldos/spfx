@@ -71,3 +71,12 @@ float vol_master_for_mode_switch(float m, int from, int to)
 	float k = floorf(n * (float)VOL_STEPS + 1e-3f);
 	return k / (float)VOL_STEPS;
 }
+
+int vol_next_out_mode(int mode)
+{
+	switch (mode) {
+	case OUT_MODE_HP: return OUT_MODE_LOUD;
+	case OUT_MODE_LOUD: return OUT_MODE_LINE;
+	default: return OUT_MODE_HP;
+	}
+}

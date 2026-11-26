@@ -35,7 +35,8 @@ typedef enum {
 	GE_POWER_OFF,     /* FN held alone GESTURE_FN_LONG_MS: return to bootloader */
 	GE_CHAN_DOWN,     /* arg = slot: a channel button went down (for UI) */
 	GE_CHAN_UP,       /* arg = slot */
-	GE_CYCLE_PRESET   /* arg = +1/-1: FN + rocker (repeats while held) */
+	GE_CYCLE_PRESET,  /* arg = +1/-1: FN + rocker (repeats while held) */
+	GE_OUT_LEVEL      /* VOL+ and VOL- held together GESTURE_VOL_BOTH_MS: next headphone-jack level */
 } gesture_type;
 
 typedef struct {
@@ -53,6 +54,9 @@ typedef struct {
 #define GESTURE_ROCKER_REPEAT_MS 200u
 #define GESTURE_VOL_DELAY_MS 400u
 #define GESTURE_VOL_REPEAT_MS 90u
+/* VOL+ and VOL- held together this long = next output level (owner request, 2026.11.25.2).
+ * While both are down the volume does not repeat; one event per hold. */
+#define GESTURE_VOL_BOTH_MS 3000u
 #define GESTURE_MAX_EVENTS 8
 
 typedef struct {
@@ -68,6 +72,8 @@ typedef struct {
 	uint32_t rk_next;
 	int8_t vol_dir;
 	uint32_t vol_next;
+	uint8_t vol_both, vol_both_sent;
+	uint32_t vol_both_t;
 } gesture_t;
 
 void gesture_init(gesture_t *g);

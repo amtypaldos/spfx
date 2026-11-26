@@ -8,7 +8,7 @@ This is an unofficial hobby project. It is not affiliated with, endorsed by, or 
 
 **Development firmware, hobby quality, not production-ready.** The evidence labels follow `docs/STATUS.md`.
 
-**Current release: [`v2026.11.25`](https://github.com/amtypaldos/spfx/releases), the integrated firmware (`firmware/app/zephyr_sp1fx`).** Owner report (2026-11-25): the integrated firmware (latest image) and the companion work decently well, with some minor bugs that are not yet itemised. In the owner's words: "Everything has been tested and it's a little buggy but works decently well." The report came by chat; no console log or itemised results are recorded. Releases are named by date from 2026.11.25 on (`YYYY.MM.DD`, tag `vYYYY.MM.DD`; earlier: `v1-rc1`..`v1-rc6`). The image combines USB audio + effects, buttons/faders/LEDs, VOL+/VOL- volume (2 dB steps, saved), the companion protocol on the USB serial port, settings saved to internal flash (0xFD000-0xFEFFF), a charge standby with a battery gauge, and the sync jack (off by default). Owner test plan: `docs/BRINGUP_SP1FX.md`; history of the release candidates: `docs/STATUS.md`.
+**Current release: [`v2026.11.25`](https://github.com/amtypaldos/spfx/releases), the integrated firmware (`firmware/app/zephyr_sp1fx`). Newest: `v2026.11.25.2` (pre-release, not run on hardware), which adds holding VOL+ and VOL- for 3 s to change the headphone-jack level.** Owner report (2026-11-25): the integrated firmware (2026.11.25) and the companion work decently well, with some minor bugs that are not yet itemised. In the owner's words: "Everything has been tested and it's a little buggy but works decently well." The report came by chat; no console log or itemised results are recorded. Releases are named by date from 2026.11.25 on (`YYYY.MM.DD`, tag `vYYYY.MM.DD`; earlier: `v1-rc1`..`v1-rc6`). The image combines USB audio + effects, buttons/faders/LEDs, VOL+/VOL- volume (2 dB steps, saved), the companion protocol on the USB serial port, settings saved to internal flash (0xFD000-0xFEFFF), a charge standby with a battery gauge, and the sync jack (off by default). Owner test plan: `docs/BRINGUP_SP1FX.md`; history of the release candidates: `docs/STATUS.md`.
 
 **Verified on hardware** (owner-observed, spare unit; see `docs/STATUS.md`):
 
@@ -32,7 +32,7 @@ This is an unofficial hobby project. It is not affiliated with, endorsed by, or 
 
 Quick-reference guide: [PDF](docs/guide/sp1fx-guide.pdf) | [HTML source](docs/guide/sp1fx-guide.html)
 
-The guide matches firmware 2026.11.25. Text summary of the controls, for readers who cannot see the image:
+The guide matches firmware 2026.11.25.2. Text summary of the controls, for readers who cannot see the image:
 
 - **Rocker (FWD/REV), with T1-T4 held:** next or previous effect for that slot. The cycle wraps through None. Holding the rocker repeats.
 - **Faders 1-4:** wet/dry mix of slots 1-4 in performance mode. In edit mode, the same faders set that effect's four parameters.
@@ -43,10 +43,11 @@ The guide matches firmware 2026.11.25. Text summary of the controls, for readers
 - **FN hold 4 s (alone):** power on and power off. The 8 LEDs fill one per 0.5 s (PLAY-side LEDs, then T1-T4). Pressing any other button during the hold cancels it.
 - **Off with USB plugged in:** the unit does not switch on; it charges and shows a battery gauge of 1-8 LEDs. The top LED pulses while charging and is steady when full.
 - **VOL- / VOL+:** master volume, 2 dB per press (-60 to 0 dB), shown as a bar on the PLAY-side LEDs (LED 1 blinks at mute). Holding repeats. Saved.
+- **VOL- + VOL+ held together 3 s (2026.11.25.2+):** next headphone-jack level, Headphones > Loud > Line out > Headphones. The PLAY-side LEDs flash, then 1/2/3 LEDs show the level. Plug in first: on the speaker it is refused (alternating flash). A louder level lowers the volume first, so nothing jumps.
 - **Soft takeover:** when a fader changes role, its value does not jump. Its LED blinks while you move it toward the stored value. A bright flash on a dim base means move up. A bright blink with a dark gap means move down. A steady LED means picked up.
 - **LEDs beside PLAY:** output level, or a flashing row when a change is refused (for example, an effect that does not fit the DSP memory or CPU budget). In edit mode, one LED pulses slowly to show the slot being edited.
 - **Track LED blinking slowly (1 Hz):** the overload guard switched that slot off to keep the audio running.
-- **Jacks:** headphone jack = audio out, every start at Headphones level; SYNC jack = MIDI clock and Pocket Operator sync out (not audio); USB-C = audio in from a computer or phone, charging, and the companion app. Loud / Line out, sync on/off and tempo are set in the [companion app](https://amtypaldos.github.io/spfx/).
+- **Jacks:** headphone jack = audio out, every start at Headphones level; SYNC jack = MIDI clock and Pocket Operator sync out (not audio); USB-C = audio in from a computer or phone, charging, and the companion app. Loud / Line out: VOL- + VOL+ held 3 s (2026.11.25.2+) or the companion app. Sync on/off and tempo are set in the [companion app](https://amtypaldos.github.io/spfx/).
 
 ## How it works
 
@@ -162,6 +163,7 @@ Procedure:
 | `sp1fx-v1-rc4.bin` | Integrated firmware rc4. Superseded by rc5 (not run). |
 | `sp1fx-v1-rc5.bin` | Integrated firmware rc5 (three jack levels, feedback saturation). Worked on the owner's unit. Superseded by rc6. |
 | `sp1fx-v1-rc6.bin` | Integrated firmware rc6 = rc5 + battery fuel gauge in the charge standby (off + USB), battery % in console/companion, no charging LED while on. GitHub release `v1-rc6`. No hardware result reported for rc6 itself. Needs the companion from the same commit or later. Superseded by 2026.11.25. |
+| `sp1fx-2026.11.25.2.bin` | **Integrated firmware 2026.11.25.2 (newest, pre-release)** = 2026.11.25 + VOL- and VOL+ held 3 s change the headphone-jack level; the companion follows level changes made on the device. GitHub release `v2026.11.25.2`. NOT RUN ON HARDWARE. |
 | `sp1fx-2026.11.25.bin` | **Integrated firmware 2026.11.25 (current release)** = rc6 + feature list for the companion (it grays out what the firmware lacks), date-based version, no build paths in the ELF. GitHub release `v2026.11.25`. Owner report: works decently well, some minor bugs not yet itemised. Works with this and later companions. Test plan: `docs/BRINGUP_SP1FX.md`. |
 | `RECOVERY-tape-looper-from-repo.bin` | Tape Looper release (from Tape Looper's GitHub releases), recovery only. Not built from or redistributed by this repository. |
 

@@ -843,6 +843,80 @@ static void test_fn_rocker_does_not_break_other_gestures(void)
 	CHECK(ui.preset_idx == -1);
 }
 
+/* VOL+ and VOL- held together for GESTURE_VOL_BOTH_MS: one output-level request per hold,
+ * no volume repeat while both are down, the two presses cancel out */
+static void test_vol_both_hold_requests_output_level(void)
+{
+	setup(850);
+	engine_set_master(&eng, 0.5f);
+	hold(B(BTN_VOLUP), 40);
+	hold(B(BTN_VOLUP) | B(BTN_VOLDN), GESTURE_VOL_BOTH_MS - 200);
+	CHECK(ui.out_level_request == 0);
+	CHECK_NEAR(eng.cfg.master, 0.5, 1e-4); /* +1 step then -1 step, no repeat while both held */
+	hold(B(BTN_VOLUP) | B(BTN_VOLDN), 300);
+	CHECK(ui.out_level_request == 1);
+	ui.out_level_request = 0;
+	hold(B(BTN_VOLUP) | B(BTN_VOLDN), GESTURE_VOL_BOTH_MS + 500); /* still the same hold */
+	CHECK(ui.out_level_request == 0);
+	CHECK_NEAR(eng.cfg.master, 0.5, 1e-4);
+	/* let go of one: the other does not start repeating */
+	hold(B(BTN_VOLDN), 1000);
+	CHECK_NEAR(eng.cfg.master, 0.5, 1e-4);
+	hold(0, 40);
+	/* released early: nothing */
+	hold(B(BTN_VOLUP) | B(BTN_VOLDN), GESTURE_VOL_BOTH_MS / 2); hold(0, 40);
+	CHECK(ui.out_level_request == 0);
+	/* a new hold asks again */
+	hold(B(BTN_VOLUP) | B(BTN_VOLDN), GESTURE_VOL_BOTH_MS + 40);
+	CHECK(ui.out_level_request == 1);
+	hold(0, 40);
+	/* a single VOL button still repeats */
+	ui.out_level_request = 0;
+	engine_set_master(&eng, 0.5f);
+	hold(B(BTN_VOLUP), GESTURE_VOL_DELAY_MS + 5 * GESTURE_VOL_REPEAT_MS); hold(0, 40);
+	CHECK(eng.cfg.master > 0.5f + 3.0f / VOL_STEPS);
+	CHECK(ui.out_level_request == 0);
+}
+
+/* confirmation: the four PLAY-side LEDs flash 7 times in 0.7 s, then a bar shows the level
+ * (Headphones 1, Loud 2, Line out 3 LEDs) */
+static void test_out_level_leds(void)
+{
+	setup(850);
+	led_frame_t f;
+	hold(0, 40);
+	controller_show_out_level(&ui, T, OUT_MODE_LOUD);
+	int flashes = 0, last_on = 0;
+	for (uint32_t t = T; t < T + OUT_LEVEL_FLASH_MS; t += 5) {
+		controller_leds(&ui, t, &f);
+		int on = f.play[0] == 255;
+		CHECK(f.play[1] == f.play[0] && f.play[2] == f.play[0] && f.play[3] == f.play[0]);
+		if (on && !last_on) flashes++;
+		last_on = on;
+	}
+	CHECK_MSG(flashes == 7, "flashes %d", flashes);
+	controller_leds(&ui, T + OUT_LEVEL_FLASH_MS + 100, &f);
+	CHECK(f.play[0] == 255 && f.play[1] == 255 && f.play[2] == 0 && f.play[3] == 0);
+	controller_leds(&ui, T + OUT_LEVEL_BAR_MS + 100, &f);
+	CHECK(f.play[0] == 0 && f.play[1] == 0); /* back to the level meter (silent) */
+	controller_show_out_level(&ui, T, OUT_MODE_HP);
+	controller_leds(&ui, T + OUT_LEVEL_FLASH_MS + 100, &f);
+	CHECK(f.play[0] == 255 && f.play[1] == 0);
+	controller_show_out_level(&ui, T, OUT_MODE_LINE);
+	controller_leds(&ui, T + OUT_LEVEL_FLASH_MS + 100, &f);
+	CHECK(f.play[0] == 255 && f.play[1] == 255 && f.play[2] == 255 && f.play[3] == 0);
+	/* the volume bar from the two VOL presses does not hide the confirmation */
+	hold(B(BTN_VOLUP) | B(BTN_VOLDN), 40);
+	controller_show_out_level(&ui, T, OUT_MODE_HP);
+	controller_leds(&ui, T + OUT_LEVEL_FLASH_MS + 100, &f);
+	CHECK(f.play[0] == 255 && f.play[1] == 0 && f.play[2] == 0);
+	/* the next level in the cycle: Headphones -> Loud -> Line out -> Headphones */
+	CHECK(vol_next_out_mode(OUT_MODE_HP) == OUT_MODE_LOUD);
+	CHECK(vol_next_out_mode(OUT_MODE_LOUD) == OUT_MODE_LINE);
+	CHECK(vol_next_out_mode(OUT_MODE_LINE) == OUT_MODE_HP);
+	CHECK(vol_next_out_mode(7) == OUT_MODE_HP);
+}
+
 int main(void)
 {
 	RUN(test_debounce);
@@ -855,6 +929,8 @@ int main(void)
 	RUN(test_volume_steps_and_repeat);
 	RUN(test_volume_mapping);
 	RUN(test_volume_led_bar);
+	RUN(test_vol_both_hold_requests_output_level);
+	RUN(test_out_level_leds);
 	RUN(test_output_mode_levels);
 	RUN(test_edit_mode_and_takeover);
 	RUN(test_takeover_unit);

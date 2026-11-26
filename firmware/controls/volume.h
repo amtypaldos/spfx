@@ -59,5 +59,8 @@ int vol_line_extra_db(void);   /* = vol_mode_extra_db(OUT_MODE_LINE) */
  * master is lowered by the difference (rounded down to the VOL grid, clamped at mute); to a
  * quieter mode it is kept. */
 float vol_master_for_mode_switch(float m, int from_mode, int to_mode);
+/* VOL+ and VOL- held together: the next level by loudness, Headphones -> Loud -> Line out ->
+ * Headphones (unknown modes -> Headphones). */
+int vol_next_out_mode(int mode);
 
 #endif

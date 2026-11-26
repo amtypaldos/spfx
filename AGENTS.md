@@ -56,18 +56,19 @@ Project: **SP-1 FX**, custom real-time multi-effects firmware for the Teenage En
 - The owner tests one image at a time and reports by chat. Do not call something a crash until the log shows a reset (an earlier "crash" was the FN
   long-hold power-off). Check the log before guessing.
 - Power gestures: FN hold 4 s (8-LED fill) powers off and on; plugging in USB while off does not boot, it charges and shows a fuel gauge. FN+FWD/REV
-  cycles presets; FN+T1-T4 edit mode; PLAY global bypass; VOL +-2 dB steps. See `docs/guide/` and `docs/BRINGUP_SP1FX.md`.
+  cycles presets; FN+T1-T4 edit mode; PLAY global bypass; VOL +-2 dB steps;
+  VOL+ and VOL- held 3 s steps the jack level Headphones > Loud > Line out (2026.11.25.2+, only with a plug in the jack). See `docs/guide/` and `docs/BRINGUP_SP1FX.md`.
 
 ## Releases
 Date-based from 2026.11.25 on: `YYYY.MM.DD` (`.2`, `.3` for more on the same day), git tag `vYYYY.MM.DD`, firmware string
 `sp1fx-YYYY.MM.DD`, published as GitHub releases (assets: `.bin`, `.elf`, companion zip, `BINARY_NOTICES.md`, `SHA256SUMS`).
-Earlier names: `v1-rc1`..`v1-rc6`. Untested releases are marked as GitHub pre-releases. Current: `v2026.11.25`. Owner report
+Earlier names: `v1-rc1`..`v1-rc6`. Untested releases are marked as GitHub pre-releases. Current: `v2026.11.25`; newest `v2026.11.25.2` (pre-release, not run on hardware). Owner report
 (2026-11-25): "Everything has been tested and it's a little buggy but works decently well" (image not named, recorded as the latest;
 bugs not yet itemised; no console log recorded).
 
 ## Decisions already made (do not re-ask)
 USB audio in/out; computer and phone hosts (Mac and iPhone verified); effect selection LEDs show no numbers; tempo and sync on/off from the companion only
-(sync default OFF, saved); presets are factory-only on the device, named/user presets live in the companion; saves are event-based (preset switch,
+(sync default OFF, saved); jack level from the companion or VOL+ and VOL- held 3 s; presets are factory-only on the device, named/user presets live in the companion; saves are event-based (preset switch,
 mode exit, effect change, power off, companion SAVE_NOW, 120 s fallback); output levels Headphones / Loud / Line out with Headphones at every boot;
 reuse Tape Looper's MIT drivers with attribution; one change at a time, staged images; subagents with small context for large tasks.
 
