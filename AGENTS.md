@@ -28,9 +28,11 @@ Project: **SP-1 FX**, custom real-time multi-effects firmware for the Teenage En
 ## Where things are
 - `firmware/dsp/` engine + 10 effects; `firmware/controls/` gestures, soft takeover, LEDs, volume; `firmware/protocol/`, `firmware/storage/`.
 - `firmware/app/zephyr_sp1fx/` is the integrated firmware (current). Older bring-up apps (min, tone, controls, sync, usbaudio, fxprof) stay for isolation tests.
-- `companion/` Web Serial app (Chrome only). Hosted on GitHub Pages at https://amtypaldos.github.io/spfx/ (deployed from `v*` tags by
-  `.github/workflows/pages.yml`), or serve it locally, e.g. `python3 -m http.server 8765 --bind 127.0.0.1` in `companion/`.
-  A companion must match the firmware's STATE/METERS format (they are released together).
+- `companion/` Web Serial app. Hosted on GitHub Pages at https://amtypaldos.github.io/spfx/ (deployed from `v*` tags or a manual run of
+  `.github/workflows/pages.yml`), or serve it locally with any static server, e.g. `python3 -m http.server 8765 --bind 127.0.0.1` in `companion/`.
+  Connecting needs desktop Chrome/Edge (Web Serial); iOS cannot connect (demo device and preset library still work); Android is untested.
+  A companion must match the firmware's STATE/METERS format (they are released together). From 2026.11.25 on the companion ignores unknown
+  trailing bytes and grays out features the firmware does not declare in HELLO_RSP `caps` (`docs/PROTOCOL.md`).
 - `tests/` host C tests (`make test`) and `companion/tests/` (Node 22). `tools/fxprof_emu/` offline cycle estimator (needs unicorn/capstone/pyelftools).
 - `tools/serial_log.py` read-only serial logger (see below). `docs/BRINGUP_SP1FX.md` owner test steps. `docs/research/` research notes.
 
@@ -39,7 +41,9 @@ Project: **SP-1 FX**, custom real-time multi-effects firmware for the Teenage En
 2. `firmware/scripts/build_firmware.sh setup` builds the toolchain in `../toolchain` (venv, pinned west workspace, Zephyr SDK 0.17.4, SHA-256 checked;
    see `docs/BUILD.md`). `firmware/scripts/build_firmware.sh --app sp1fx build` builds and runs `check_image.py`; `... --app sp1fx repro` builds twice and compares.
 3. `make clean && make && make test` must print 0 warnings and `ALL TEST BINARIES PASSED`; `node --test companion/tests/*.test.mjs` must pass.
-4. **Flash images are not in git.** Rebuild them, or copy the owner's `flash-ready/` folder (it holds `SHA256SUMS`; verify with `shasum -a 256 -c`).
+4. **Flash images are not in git.** Download released images from the GitHub releases (`v1-rc6` and later: `.bin`, `.elf`, companion zip,
+   `BINARY_NOTICES.md`, `SHA256SUMS`), rebuild them, or copy the owner's local `flash-ready/` folder (it holds `SHA256SUMS`). Verify with
+   `shasum -a 256 -c SHA256SUMS`.
    Keep a recovery image: Tape Looper's own release (from its GitHub releases), flashed the same way.
 
 ## How we work with the hardware
@@ -54,6 +58,13 @@ Project: **SP-1 FX**, custom real-time multi-effects firmware for the Teenage En
 - Power gestures: FN hold 4 s (8-LED fill) powers off and on; plugging in USB while off does not boot, it charges and shows a fuel gauge. FN+FWD/REV
   cycles presets; FN+T1-T4 edit mode; PLAY global bypass; VOL +-2 dB steps. See `docs/guide/` and `docs/BRINGUP_SP1FX.md`.
 
+## Releases
+Date-based from 2026.11.25 on: `YYYY.MM.DD` (`.2`, `.3` for more on the same day), git tag `vYYYY.MM.DD`, firmware string
+`sp1fx-YYYY.MM.DD`, published as GitHub releases (assets: `.bin`, `.elf`, companion zip, `BINARY_NOTICES.md`, `SHA256SUMS`).
+Earlier names: `v1-rc1`..`v1-rc6`. Untested releases are marked as GitHub pre-releases. Current: `v2026.11.25`. Owner report
+(2026-11-25): "Everything has been tested and it's a little buggy but works decently well" (image not named, recorded as the latest;
+bugs not yet itemised; no console log recorded).
+
 ## Decisions already made (do not re-ask)
 USB audio in/out; computer and phone hosts (Mac and iPhone verified); effect selection LEDs show no numbers; tempo and sync on/off from the companion only
 (sync default OFF, saved); presets are factory-only on the device, named/user presets live in the companion; saves are event-based (preset switch,
@@ -61,6 +72,8 @@ mode exit, effect change, power off, companion SAVE_NOW, 120 s fallback); output
 reuse Tape Looper's MIT drivers with attribution; one change at a time, staged images; subagents with small context for large tasks.
 
 ## Open items (see docs/STATUS.md)
-Sync jack with real gear (PO/EP) untested; image B (USB audio return to host) untested; Windows needs a UAC2 patch not applied; USB threads use ~21 % CPU
-for plain audio (unexplained); battery fuel gauge and charge pins are source-derived and uncalibrated; unexplained one-off T3/T4 blink on first fader touch;
-history/email/path review before making the repo public (`THIRD_PARTY_NOTICES.md` end).
+Minor bugs from the owner's 2026-11-25 report, not yet itemised; sync jack with real gear (PO/EP/Volca) not separately confirmed (owner reports
+everything tested); image B (USB audio return to host) untested; Windows needs a UAC2 patch not applied; USB threads use ~21 % CPU for plain audio
+(unexplained); battery fuel gauge and charge pins are source-derived and uncalibrated; output levels calculated, not measured; declared effect
+`cpu_cycles` unmeasured (fxprof not run); unexplained one-off T3/T4 blink on first fader touch.
+Done: the history/email/path review (history rewritten, repository public; `THIRD_PARTY_NOTICES.md` end).

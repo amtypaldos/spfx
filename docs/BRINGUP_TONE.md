@@ -1,6 +1,10 @@
 # Audio bring-up image: quiet test tone (`zephyr_tone`)
 
-Status: **built, not run.** This image has **never run on an SP-1**. Every behaviour below
+Status: bring-up record, superseded by the integrated firmware (`BRINGUP_SP1FX.md`). The tone image later ran on the
+owner's unit (2026-11-24 [HW]: left channel low tone, right channel high tone; `docs/STATUS.md`, "Hardware log"). Not
+published as a release; rebuild it from source.
+
+Status when written: **built, not run.** This image has **never run on an SP-1**. Every behaviour below
 is *expected* from reading the code and the sources it was ported from; none of it has been
 observed. Nothing in this repository flashes anything; flashing is a manual step by the owner.
 

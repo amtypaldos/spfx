@@ -1,15 +1,29 @@
 # SP-1 FX — status, test results, known issues
 
-Evidence key: **[HW]** observed on the owner's SP-1 (owner-run; see the hardware log). **[HOST]** verified by automated tests on a development Mac. **[SRC]** from upstream source/docs or our own build output. **[UNTESTED]** built but never run. **[TODO]** not started. The integrated image v1-rc1 has **not** been run on an SP-1.
+Evidence key: **[HW]** observed on the owner's SP-1 (owner-run; see the hardware log). **[HOST]** verified by automated tests on a development Mac. **[SRC]** from upstream source/docs or our own build output. **[UNTESTED]** built but never run. **[TODO]** not started. **[HW, owner report]** is the owner's summary by chat, with no console log or itemised results recorded.
 
-## 2026.11.25 -- NOT RUN ON HARDWARE
+**Current state (2026-11-25):** the current release is `v2026.11.25` (GitHub release). Owner report: the integrated
+firmware (latest image) and the companion work decently well, with some minor bugs that are not yet itemised
+[HW, owner report]. Not covered by that report and unchanged: sync with external gear (not separately confirmed),
+image B (USB audio return to host, a separate bring-up image), Windows (expected not to work), and every calculated or
+uncalibrated value (jack levels, battery %, declared effect CPU costs).
+
+## 2026.11.25 (current release) -- works decently well, some minor bugs [HW, owner report]
 
 `sp1fx-2026.11.25.bin`, SHA-256 `74656b23c8982a4955c55b2e6af9d747599f4f46358577a39c6f57ab11fa0214`,
 153,644 B, check PASS, reproducible, 0 warnings; host suites pass, companion 62/62.
 
+**Owner report (by chat, 2026-11-25) [HW, owner report]:** "Everything has been tested and it's a little buggy but
+works decently well." Earlier the same day, about the companion: "This has been tested and works on a real SP1".
+The owner did not name the image; it is recorded here as the latest one, `sp1fx-2026.11.25.bin`. The bugs are not
+itemised yet, and no console log is recorded. Not covered: sync with external gear (owner reports
+everything tested; sync with external gear not separately confirmed), latency (not measured), the calculated jack
+levels and the uncalibrated battery %.
+
 **Version scheme change:** from this image on, releases are named by date, `YYYY.MM.DD` (`.2`, `.3` for a
 second or third release on the same day). The firmware string is `sp1fx-2026.11.25`, the git tag `v2026.11.25`.
-"Not run on hardware" is shown by the GitHub pre-release flag and this label. `v1-rc1`..`v1-rc6` are the earlier names.
+Releases are published as GitHub releases with these assets: `.bin`, `.elf`, the companion zip, `BINARY_NOTICES.md`
+and `SHA256SUMS`. Untested releases are marked as GitHub pre-releases. `v1-rc1`..`v1-rc6` are the earlier names.
 
 = rc6 plus:
 - **Feature list in HELLO_RSP** (`caps u32`, `docs/PROTOCOL.md`) [HOST]. This image declares SYNC, OUT_LINE,
@@ -18,7 +32,8 @@ second or third release on the same day). The firmware string is `sp1fx-2026.11.
 - **Companion** [HOST, headless Chrome with a reduced-feature demo device]:
   - grays out controls the firmware doesn't declare, with a "needs newer firmware" note;
   - ignores unknown trailing bytes from the device, so later firmware no longer breaks it;
-  - with rc6 (no caps field), it assumes the rc6 feature set. Not run against a real SP-1.
+  - with rc6 (no caps field), it assumes the rc6 feature set [HOST]. The companion has since been used with a
+    real SP-1 [HW, owner report]; the rc6 fallback was not separately confirmed on hardware.
 - **Build:** `-ffile-prefix-map` / assembler `--debug-prefix-map` keep build-machine paths out of the ELF
   (0 left, from ~1,275 in rc6). No change to the audio path or controls.
 
@@ -248,11 +263,12 @@ still say "16 steps" (HTML updated); Windows; latency measurement.
 | Controls (`firmware/controls`) | debounce, gesture state machine, soft takeover, controller, monochrome LED renderer. **[HOST]** |
 | Sync out scheduler (`firmware/app/sync_out.c`) | 24 PPQN + PO pulses, drift-free. **[HOST]** |
 | Simulator (`simulator/`) | WAV in/out through the real engine, `--list`, `--bench`. **[HOST]** |
-| Config sanitising (`engine_config_sanitize`) | repairs corrupt configs. **[HOST]** Binary storage/journal: **[TODO]** |
-| USB audio in/out, I2S, codec drivers, ladder decode, LED PWM | **[TODO]** (reuse Tape Looper drivers, MIT) |
-| Persistence (`firmware/storage`) | versioned record + two-page power-loss-safe journal, write debounce, spare-page pre-erase. **[HOST]** On flash at 0xFD000-0xFEFFF in v1-rc1 **[UNTESTED]** |
-| Protocol (`docs/PROTOCOL.md`, `firmware/protocol`) | spec + C device side, byte-compatible with the companion's JS on golden frames, 100k-stream fuzz. **[HOST]** USB CDC transport: built in v1-rc1 **[UNTESTED]** |
-| Companion (`companion/`) | Web Serial + demo device, Tape Looper-style UI, presets. 62 Node tests + headless browser smoke test. **Works with a real SP-1 [HW, owner report 2026-11-25]**; image and controls exercised not recorded. |
+| Integrated firmware (`firmware/app/zephyr_sp1fx`) | USB audio + engine, controls, volume, protocol, settings journal, sync jack, charge standby. Current release `v2026.11.25`. rc1 (watchdog resets), rc2, rc3 and rc5 ran on the owner's unit **[HW]**; 2026.11.25 works decently well with some minor bugs, not yet itemised **[HW, owner report 2026-11-25]**. Sync with external gear not separately confirmed. |
+| Config sanitising (`engine_config_sanitize`) | repairs corrupt configs. **[HOST]** |
+| USB audio in, I2S, codec drivers, ladder decode, LED PWM | adapted from Tape Looper (MIT). USB audio in from a Mac **[HW]** (usbaudio image A v1-v3, integrated rc2 on); iPhone host **[HW, owner report; date and image not recorded]**. Return to the host (image B, `zephyr_usbaudio_io`): **[UNTESTED]**. Windows: expected not to work (UAC2 patch not applied). |
+| Persistence (`firmware/storage`) | versioned record + two-page power-loss-safe journal, write debounce, spare-page pre-erase. **[HOST]** On flash at 0xFD000-0xFEFFF: saves seen in the rc1-rc3 consoles **[HW]**; part of the owner's 2026-11-25 report **[HW, owner report]**. |
+| Protocol (`docs/PROTOCOL.md`, `firmware/protocol`) | spec + C device side, byte-compatible with the companion's JS on golden frames, 100k-stream fuzz. **[HOST]** USB CDC transport with the companion **[HW, owner report 2026-11-25]**. |
+| Companion (`companion/`) | Web Serial + demo device, Tape Looper-style UI, presets; grays out features the firmware does not declare. 62 Node tests + headless browser smoke test. Hosted on GitHub Pages (<https://amtypaldos.github.io/spfx/>). **Works with a real SP-1, some minor bugs not yet itemised [HW, owner report 2026-11-25]**; browser and OS not recorded. Connecting needs desktop Chrome/Edge; iOS cannot connect (no Web Serial in WebKit); Android untested. |
 | Factory presets (`presets/`, `firmware/app/factory_presets.h`) | six presets, each runs through the real engine within budget. **[HOST]** |
 | Build (`docs/BUILD.md`, `firmware/scripts`, `firmware/app/zephyr_min`) | Zephyr **v4.3.1** (Tape Looper's lock file pins this, not 4.1) + SDK 0.17.4 in `../toolchain`. Minimal heartbeat/watchdog/FN-power-off image builds: 17,316 B at 0x20000, bit-identical across 3 clean builds, `check_image.py` passes. **Verified on hardware (owner report, 2026-11-24, spare SP-1, flashed via Solderless): the image boots and track LED 1 blinks.** Not yet confirmed: steady blinking beyond the 5 s watchdog window, FN-hold power-off, behavior with USB plugged in. |
 | Preset cycling (ADR-004) | FN + rocker, fade, flash + position bar, `PRESET_LOADED` event, C + companion. **[HOST]** Device-side user presets: **[TODO]** |
@@ -314,12 +330,16 @@ admission-arithmetic tests (C and companion JS) were updated for the new declare
 Reverb memory declaration kept at 43,116 B (uses 10,868) to keep memory admission and the
 protocol unchanged.
 
-Images (built, check_image PASS, reproducible, **not run on hardware**): `sp1fx-fxprof.bin`
+Images (built, check_image PASS, reproducible, **not run on hardware** when this was written): `sp1fx-fxprof.bin`
 (SHA-256 81c9b1de...0443; profiling, silent, docs/BRINGUP_FXPROF.md) and
 `sp1fx-usbaudio-in-v3.bin` (315d7eef...e00f; docs/BRINGUP_USBAUDIO.md "v3").
+Later: v3 ran on the owner's unit at about 50 % CPU per preset [HW, see the Hardware log]; fxprof has no recorded
+result, so the declared values are still unmeasured.
 Next: owner runs fxprof -> replace the declared values with measured ones.
 
-## Test results (`make test`: 12 C test binaries; `node --test companion/tests/*.test.mjs`: 55; all pass, 0 warnings)
+## Test results (`make test`: 12 C test binaries; `node --test companion/tests/*.test.mjs`: 62; all pass, 0 warnings; rerun 2026-11-25)
+
+The per-suite check counts below were recorded at v1-rc1 and earlier; the suites have grown since.
 - v1-rc1 additions: `test_app_logic` 75,359 checks (save/erase scheduling incl. a 2 h simulated session with the real journal, console mode switch, 0x00 separator through the C parser, quiet detector, rate limiter); `test_controls` +volume grid/dB/LED bar, one Clean, volume kept on preset load (318 total); `test_storage` +spare pre-erase and power cut during it (2,725); `test_fxprof_core` windowed guard (271,539); `test_protocol` VOL+ event golden frame regenerated from the JS for the 2 dB grid (903).
 - Also: `test_storage` 1,426 checks, `test_protocol` 903, `test_presets` 557, `test_controls` 172.
 - `test_dsp`: 2,382 checks. Parameter map/unmap, silence, 16 parameter corners x every effect with loud noise, automation stability, stereo isolation, filter frequency response (LP/HP), delay timing exact to the sample, feedback ratio, reverb decay, chorus delay, tremolo depth, compressor level, fast-math accuracy, recovery after NaN.
@@ -338,39 +358,44 @@ Next: owner runs fxprof -> replace the declared values with measured ones.
 - Delay max 400 ms (RAM); reverb ~43 KB; delay ~77 KB. With a 150 KB pool, "delay + two reverbs" is rejected by design.
 - CPU numbers in effect descriptors are **UNMEASURED estimates** (instruction-count emulation x1.3, see "CPU" above). Host speed is not a proxy. Real numbers: run `sp1fx-fxprof.bin` (docs/BRINGUP_FXPROF.md).
 - 8 LEDs, each a single dimmable LED (4 track + 4 beside PLAY). "Length" encodings are impossible; patterns use brightness/blink only. PWM gamma and visibility floor need tuning on a device.
-- Rocker is two momentary buttons; button ladder decode thresholds still to be taken from upstream (calibrated raw ADC values).
+- Rocker is two momentary buttons. The ladder decode thresholds come from Tape Looper and decoded every button correctly on the owner's unit [HW, controls image and integrated rc3].
 - Soft-takeover pickup window (2.5%) and deadband (0.4%) are guesses pending real fader noise measurements.
 - Default config (no saved settings) starts with all slots bypassed and master at 75 % (-15 dB, -21 dBFS ceiling with the -6 dB trim).
 
 ## Next steps (suggested order)
-1. Persistence: versioned binary config + A/B journal on a mock flash, power-loss tests (host).
-2. Protocol: COBS-framed, CRC16, versioned; parser + fuzz tests (host); then Web Serial companion.
-3. Presets (JSON schema + factory presets validated against the admission limits).
-4. Firmware build environment (Zephyr 4.3.1 / SDK 0.17.4, pinned modules) producing an app-only image at 0x20000. **No flashing.**
-5. **Ask for approval** before any flash: back up current firmware, flash one device, measure USB->headphone latency, CPU cycles, underruns.
+The original plan (persistence, protocol, presets, build environment, first flash) is done.
+1. Itemise the minor bugs from the owner's 2026-11-25 report and fix them one at a time, one staged image each.
+2. Sync jack with real gear (EP-133 / EP-40 / PO / Volca): not separately confirmed (BRINGUP_SP1FX.md "Stage 4").
+3. Run `sp1fx-fxprof.bin` and replace the declared effect `cpu_cycles` with measured ones.
+4. Battery %: report `batt_raw=` values (with and without USB, and nearly empty) so the divider constant can be calibrated.
+5. Measure the jack levels and the USB->headphone latency (calculated or unknown so far).
+6. Open decisions: image B (USB return to host, untested), Windows (UAC2 patch not applied), the USB threads' ~21 % CPU.
+Every flash still needs the owner's explicit approval (AGENTS.md).
 
 ## Known discrepancies / open items (from review)
 - Reverb memory: firmware declares 43,116 B, the companion's table says 43,120 (aligned). Cosmetic; the device is authoritative for admission.
 - Companion admission prediction sums memBytes only; the engine also counts state bytes and fragmentation.
-- Sync jack: BPM and an on/off switch (companion only, **saved and restored at power-up**, not part of presets) are stored and scheduled. Still missing: the hardware driver for the jack pins (timer-driven MIDI/PO output, untested upstream) and any tempo-synced effect.
+- Sync jack: BPM and an on/off switch (companion only, **saved and restored at power-up**, not part of presets) are stored and scheduled. The timer-driven MIDI/PO driver (`sync_hw.c`) is in the sync image (serial log [HW], no gear) and in the integrated firmware; sync with external gear is not separately confirmed (the owner reports everything tested). Still missing: any tempo-synced effect.
 - METERS resets held peaks, which also affects the output-level LEDs while a host is subscribed.
 - Event ring drops the oldest events silently if the host stops polling.
 - Bug found in review: companion step-parameter mapping (round vs floor) disagreed with firmware; fixed and tested.
 - Minimal image: when USB is plugged in, FN-hold enters SYSTEM_OFF and the device may stay dark until FN is pressed or USB is replugged (Tape Looper soft-resets instead). Pins, PWM ownership of the LED pin, and watchdog-channel assumptions are unverified guesses from Tape Looper's source.
 
 ## Hardware log (owner-reported; no automated evidence)
-- 2026-11-25 (owner report by chat): the companion web app works with a real SP-1 over USB (Web Serial). Not recorded: firmware image (rc6 or 2026.11.25), browser/OS, which controls were exercised.
+- 2026-11-25 (owner report by chat, later the same day): "Everything has been tested and it's a little buggy but works decently well." Recorded as: integrated firmware (latest image, `sp1fx-2026.11.25.bin`; the owner did not name it) and companion work decently well, with some minor bugs, not yet itemised. No console log recorded. Sync with external gear not separately confirmed; the calculated levels and the battery % stay uncalibrated; image B and Windows are not covered.
+- Owner report, date and image not recorded (listed in AGENTS.md "Decisions already made"): an iPhone works as a USB audio host, as does the Mac (Mac: see 2026-11-24 below).
+- 2026-11-25 (owner report by chat): "This has been tested and works on a real SP1": the companion web app works with a real SP-1 over USB (Web Serial). Not recorded: firmware image (rc6 or 2026.11.25), browser/OS, which controls were exercised.
 - 2026-11-24 (owner-run): `sp1fx-v1-rc5.bin`: everything works incl. the charge standby display -> rc6 adds the fuel gauge.
 - 2026-11-24 (owner-run, console read live by the lead): `sp1fx-v1-rc3.bin`: controls fixed (scanner works), power on/off and presets fine, no resets; control-loop starvation near-misses at ~99 % CPU -> rc4.
 - 2026-11-24 (owner-run, console read live by the lead): `sp1fx-v1-rc2.bin` runs steadily (stalls=0, no crash); FN-hold power off (1.5 s) fired by accident while cycling presets; controls dead in some boots after a SAADC scan timeout; overload guard shed and stayed latched -> rc3.
-- 2026-11-24 (owner-run, console read by the lead): `sp1fx-v1-rc1.bin` resets by watchdog every ~6-20 s (see "v1-rc2" at the top). Superseded by rc2 (not yet run).
+- 2026-11-24 (owner-run, console read by the lead): `sp1fx-v1-rc1.bin` resets by watchdog every ~6-20 s (see "v1-rc2" above). Superseded by rc2 (rc2 ran later, see above).
 - 2026-11-24: `sp1fx-min-heartbeat.bin` (SHA-256 18afab48...592667) flashed with Solderless to the spare unit; LED 1 blinks. This confirms: bootloader accepts an app linked at 0x20000, our reset/vector layout is valid, LED pin P0.29 is right.
 - 2026-11-24: `sp1fx-tone.bin` (SHA-256 87886d14...433f9): owner reports left channel low tone, right channel high tone, "sounds great". This confirms (owner-observed) the CS42L42/TAS2505 init, I2S slave clocking from the 3.072 MHz oscillator, and channel order. Not yet reported: which output was heard (speaker vs headphones), LEDs 2-4, serial status line, speaker mute on headphone insert, pop-free switching.
 - Finding from the tone build: `nfct-pins-as-gpios` in the board dts has no effect in Zephyr 4.3.1 (it is only read from `&uicr`). Making it effective would write UICR.NFCPINS (outside our image) and reset the chip: do not change without an explicit decision. P0.09 (TAS2505 reset) works as a GPIO because this unit's UICR already allows it.
 - 2026-11-24: `sp1fx-sync.bin` (SHA-256 12255e2c...3073d) flashed by the owner; serial log pasted (observed): modes cycle with FN taps, MIDI clock count rises 48/s at 120 BPM, PO pulses scheduled 4/s, 0 dropped bytes, HFXO on. Anomalies (from reading sync_hw.c, cause not proven): bit-timer ISR rate about 31,050/s vs 31,250 nominal (about 0.6% merged interrupts) and the `late` counter rising about 550/s; the reported max latency of 31 us is the measurement ceiling (timer clears at 32 us), so the true worst case is hidden. Possible fix if gear shows errors: hardware-generated edges (SPIM/PWM DMA) instead of ISR-written bits. **Real-gear test (EP-133 / EP-40 / PO / Volca) pending: owner will test later.**
-- Pending owner tests: `sp1fx-controls.bin` (checklist in docs/BRINGUP_CONTROLS.md), sync with real gear. Pending build: USB audio images (agent running).
+- Pending owner tests: `sp1fx-controls.bin` (checklist in docs/BRINGUP_CONTROLS.md), sync with real gear. Pending build: USB audio images (agent running). [Later: the controls image ran on 2026-11-24 (below); sync with external gear is still not separately confirmed.]
 - 2026-11-24: USB audio images built (not yet flashed): `sp1fx-usbaudio-in.bin` (A) and `sp1fx-usbaudio-io.bin` (B). **Architecture finding:** the nRF52840 USB controller has exactly ONE isochronous IN and ONE isochronous OUT endpoint. Image A uses the IN endpoint for explicit feedback, so image B (return stream to the host) must use implicit feedback instead (no feedback endpoint): expected to work on macOS/Linux, **not on Windows' built-in driver**. Tape Looper's UAC2 patch (Windows feedback fix) is NOT applied because build_firmware.sh refuses a modified Zephyr checkout; Windows is expected to fail on image A (Code 10). Needs an owner decision. Engine pool 150 KiB; RAM 185-189 KB of 262 KB used.
-- Pending owner tests: USB audio A then B (docs/BRINGUP_USBAUDIO.md). First real CPU-per-preset numbers will come from the A console.
+- Pending owner tests: USB audio A then B (docs/BRINGUP_USBAUDIO.md). First real CPU-per-preset numbers will come from the A console. [Later: A v1-v3 ran (below); B has no reported result.]
 - 2026-11-24 (owner-run, console log captured by me): `sp1fx-controls.bin` OBSERVED working on the spare SP-1. All 10 buttons decode correctly (raw ladder values: T1-T4 L1 = 214/405/732/1216, PLAY 908; VOL+/VOL- L2 = 1810/729; FWD/REV L2 = 1209/405). Faders 1-4 span raw 0..~3680 (0..100%), smooth, no reversals. Soft-takeover cue and edit mode (FN+T2) work (owner-observed LED behaviour). Effect cycle direction correct (FWD = next, REV = previous, wraps through None); admission refusal (`REJECTED Delay status=2`, old effect kept); FN+rocker presets step and wrap (Boom Bap, Dub Station, Clean, Ambient, Lo-Fi Tape, House); bypass tap; volume 75% <-> 81%; PLAY global bypass (walking LED); FN-hold 1.5 s power-off. Main-loop time peaked at 3.2 ms (limit 8 ms) at preset loads. Corrections to the docs: slots boot ENABLED with wet 0% (byp=0000), not bypassed. Still unobserved: the checklist items for LED brightness steps and the "blink on T3/T4 on first fader touch" the owner mentioned (console reported no pickup-needed state at boot, so that blink was not the takeover cue; cause unknown, possibly leftover bootloader PWM on the LED pins).
 - 2026-11-24 (owner-run, console-captured): `sp1fx-usbaudio-in.bin` (v1) OBSERVED: USB audio from a Mac plays through the real engine on the SP-1 (speaker), 48 kHz, drift feedback converged (~48.000 frames/ms), 60+ s with 0 underruns/overruns/I2S errors; first real CPU numbers: Clean preset (all bypassed) about 130-215 cycles/frame average, peaks 400-490; the Mac cannot control the volume (no UAC2 volume control); output peak only -15 dBFS because master 75% and the analog stages were set quiet on purpose. **CRASH OBSERVED:** the first FN tap (Clean -> Dub Station) hung the firmware: static, then silence, watchdog reset (`rr=2`) after about 5 s, device recovered by itself and the Mac stream resumed.
 - Crash analysis (subagent, not reproduced on hardware): two real engine bugs found and fixed (non-atomic `engine_apply_config` race with the audio thread; unchanged slots kept running at a stale layout after a config change), neither proven to be THE cause. Leading unproven hypothesis: Dub Station costs more CPU than the budget on the real M4F, so the priority-0 audio thread starves the main thread and the watchdog feed. Mitigations in v2: staged-config mailbox, init budget per block, starvation guard, audio stack 6 KB, crash dump (`CRASH:` line on next boot) and diagnostics (`diag` line). v2 images: `sp1fx-usbaudio-in-v2.bin` (SHA-256 9da4341d...5cd3), `sp1fx-usbaudio-io-v2.bin` (fb8b3efa...2ab7). NOT yet flashed. Retest steps: docs/BRINGUP_USBAUDIO.md.

@@ -3,15 +3,16 @@
 Static, dependency-free web app (plain HTML/CSS/ES modules, no build step) for the SP-1 FX firmware project. No cloud, no accounts, no analytics, no external requests at runtime.
 
 ## Status, honestly
-- **Works with a real SP-1** (owner report, 2026-11-25, over USB with Web Serial). The firmware side of `docs/PROTOCOL.md` is `firmware/protocol/` (in the integrated image since v1-rc1), byte-identical to this app on the shared golden frames. Not recorded in detail: which firmware image and which controls were exercised.
+- **Works with a real SP-1** (owner report, 2026-11-25, over USB with Web Serial): "This has been tested and works on a real SP1", and later "Everything has been tested and it's a little buggy but works decently well." Recorded as: works decently well with the latest firmware image (2026.11.25; the owner did not name it), some minor bugs not yet itemised. Not recorded: browser and OS. The firmware side of `docs/PROTOCOL.md` is `firmware/protocol/` (in the integrated image since v1-rc1), byte-identical to this app on the shared golden frames.
+- **Feature list:** firmware 2026.11.25 and later declares its features in HELLO_RSP (`caps`); the companion grays out controls the firmware does not declare, with a "needs newer firmware" note. With rc6 (no `caps`) it assumes the rc6 set. It also ignores unknown trailing bytes from the device, so later firmware does not break it. Host-tested with a reduced-feature demo device; the rc6 fallback was not separately confirmed on hardware.
 - **Browsers:** connecting needs Web Serial, i.e. desktop Chrome or Edge. iPhone and iPad browsers (all WebKit), Safari and Firefox can't connect; they show a notice, and the demo device and preset library still work. Android browsers are untested: the page detects Web Serial and only enables Connect where it exists.
 - Everything else has been checked against the **built-in demo device** (`js/mock-device.js`), a simulation written from the spec. It speaks the real COBS+CRC wire format through the same client code path, but it is not evidence that the firmware behaves the same way.
-- Protocol gaps and assumptions: see `PROTOCOL_NOTES.md` (notably: the STATE message is 383 bytes, over the spec's 250-byte payload limit).
+- Protocol gaps and assumptions found while writing the companion: see `PROTOCOL_NOTES.md` (a historical record; `docs/PROTOCOL.md` has since been updated, e.g. the max body is now 512 bytes so the ~383-byte STATE fits).
 
 ## Run
 Two ways, same app:
 
-- **Hosted (GitHub Pages):** open <https://amtypaldos.github.io/spfx/>. It is deployed by `.github/workflows/pages.yml` from each release tag (`v*`), after the tests pass, so it always matches the latest firmware release.
+- **Hosted (GitHub Pages):** open <https://amtypaldos.github.io/spfx/>. It is deployed by `.github/workflows/pages.yml` from each release tag (`v*`) or a manual run of that workflow, after the tests pass, so it matches the latest firmware release.
 - **Locally:** use this for unreleased changes, or for a companion that matches an older firmware image (check out that image's tag first). Each release also attaches `sp1fx-companion-<tag>.zip`, which is this folder at that tag.
 
 ```
@@ -19,7 +20,7 @@ cd companion
 python3 -m http.server 8137      # then open http://localhost:8137/
 ```
 
-A newer firmware's STATE/METERS format can be rejected by an older companion (and the other way round), so use the companion from the same release as the image on the device.
+Companions older than 2026.11.25 reject STATE/METERS messages with extra trailing bytes, so with older images use the companion from the same release as the image on the device. The 2026.11.25 companion works with rc6 and later firmware (see "Feature list" above).
 
 Locally, any static server works (a module script and a `fetch` of `data/fx_table.json` are used, so `file://` will not). Desktop Chrome or Edge is needed for **Connect SP-1** (Web Serial). Other browsers (Safari, Firefox, iOS) show a notice; the demo device and the preset manager still work there.
 

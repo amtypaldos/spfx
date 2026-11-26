@@ -1,6 +1,10 @@
 # Controls bring-up image (`sp1fx-controls.bin`)
 
-Status labels follow AGENTS.md. **This image has been built but has never run on an SP-1.**
+Status: bring-up record, superseded by the integrated firmware (`BRINGUP_SP1FX.md`). The controls image later ran on the
+owner's unit (2026-11-24 [HW]: all buttons decode, faders, soft takeover, edit mode, effect and preset cycling, power off;
+`docs/STATUS.md`, "Hardware log"). Not published as a release; rebuild it from source.
+
+Status labels follow AGENTS.md. When written: **this image has been built but has never run on an SP-1.**
 Every observation below is **EXPECTED** behaviour, derived from the source code and the host tests.
 None of it has been observed on hardware. Tick the boxes only after you have seen the behaviour yourself.
 

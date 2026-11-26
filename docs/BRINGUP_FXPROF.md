@@ -1,6 +1,7 @@
 # Effect CPU profiling image (`sp1fx-fxprof.bin`)
 
-Status: **built, never run on hardware.** Everything below about behaviour is *expected*.
+Status: **built, never run on hardware** (no result recorded as of 2026-11-25). Everything below about behaviour is *expected*.
+The declared effect `cpu_cycles` therefore stay unmeasured estimates. Not published as a release; rebuild it from source.
 
 | File in `flash-ready/` | App dir | USB product / PID | SHA-256 |
 |---|---|---|---|

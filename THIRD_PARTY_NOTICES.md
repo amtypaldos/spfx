@@ -22,7 +22,8 @@ hal_nordic `7858281d…` (nrfx 3.14.0: BSD-3-Clause; four MDK `system_*` files A
 parts are under other licences, including `LicenseRef-Nordic-5-Clause`, none of which is linked into zephyr_sp1fx),
 Zephyr SDK 0.17.4 arm-zephyr-eabi (GCC 12.2.0 and binutils, GPL; picolibc 1.8.10 and libgcc are linked into images, see below).
 
-**Binary images.** What the integrated firmware image actually links was read from its linker map (zephyr_sp1fx, v1-rc6):
+**Binary images.** What the integrated firmware image actually links was read from its linker map (zephyr_sp1fx, v1-rc6; release
+2026.11.25 links the same libraries, see `docs/BINARY_NOTICES.md`):
 Zephyr (Apache-2.0), CMSIS_6 Core headers (Apache-2.0; the older `cmsis` module is not used), nrfx/MDK (BSD-3-Clause, four
 Apache-2.0 MDK files), picolibc 1.8.10 from the SDK (BSD-style licences, a Sun/SunPro notice, a Cygnus notice, Ryu under
 Apache-2.0 OR BSL-1.0), libgcc (GPL-3.0+ with the GCC Runtime Library Exception, no notice required) and the Tape Looper-derived
@@ -117,7 +118,7 @@ similarity scan):
   cycle counts offline and are not linked into or shipped with anything here.
 - Host tests are plain C99 with no third-party code. The companion has no npm runtime dependencies; tests run on Node 22.
 
-## Items to review before the repository is made public
+## Public-release review (the repository is now public)
 
 Resolved (2026-11-25 review, branch `public-ready`):
 
@@ -134,15 +135,16 @@ Resolved (2026-11-25 review, branch `public-ready`):
   the integrated firmware now has `firmware/app/zephyr_sp1fx/NOTICES.md`.
 - [x] Personal paths: none in the current tree (absolute home paths were removed in `bf9dd0b`; they remain in older commits, see below).
 
+- [x] **Commit history** (e-mail addresses, home-directory paths in older commits): the history was rewritten before the repository
+  was made public (owner, 2026-11-25).
+- [x] Release **v2026.11.25** ships `BINARY_NOTICES.md` as a release asset, and its `.elf` has no build-machine paths
+  (`-ffile-prefix-map`, see `docs/STATUS.md`).
+
 Remaining (owner decisions or manual steps):
 
-- [ ] **Commit history** still contains a personal e-mail address as author/committer of 41 commits, a work address on the
-  `v1-rc6` tag and on local commits, the developer's home-directory paths in 15 commits before `bf9dd0b`, and `Claude-Session` links in
-  commit messages. Decide between publishing as is, rewriting authors and paths (`git filter-repo`), or publishing a fresh squashed
-  repository. Use a GitHub `noreply` address for future commits.
-- [ ] **Release v1-rc6** (`sp1fx-v1-rc6.bin`, `.elf`) has no notices attached. Upload `docs/BINARY_NOTICES.md` as a release asset (or
-  add it to the archive) before the repository becomes public. The published `.elf` contains the build machine's home-directory paths in
-  its debug information; rebuild with `-ffile-prefix-map` or do not publish the `.elf`.
+- [ ] **Release v1-rc6** (`sp1fx-v1-rc6.bin`, `.elf`) had no notices attached when this list was written. Upload
+  `docs/BINARY_NOTICES.md` as a release asset (or add it to the archive); not confirmed whether this was done. The rc6 `.elf` contains
+  the build machine's home-directory paths in its debug information; remove it from the release or leave it as is (owner decision).
 - [ ] `docs/guide/sp1fx-guide.pdf` embeds subsets of the macOS system fonts Helvetica Neue and Arial. Embedding is normal for PDFs, but
   the font licences were not checked; re-print with an openly licensed font if that matters.
 - [ ] The research notes (`docs/research/`, `docs/PHASE0_REPORT.md`) quote short excerpts and line numbers from upstream sources; review
