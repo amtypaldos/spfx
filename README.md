@@ -15,7 +15,9 @@ This is an unofficial hobby project. It is not affiliated with, endorsed by, or 
 - Minimal heartbeat, tone (codecs, I2S, channel order), controls (all buttons, faders, effect and preset cycling, soft takeover, edit mode, volume steps, power off) and sync (serial log only, no gear) bring-up images.
 - USB audio v3 (`zephyr_usbaudio`, optimised DSP): Mac audio through the engine, the six presets at about 50 % CPU, no crashes (reported by the lead). Ambient tripped the old overload guard on short spikes; the guard is changed in v1-rc1 (untested on hardware).
 
-**Source-only or simulated** (host tests, `make test`): the 4-slot engine and 10 effects, controls logic, persistence journal and its erase scheduling, the binary protocol, factory presets, the simulator, the companion web app (never run against a real SP-1).
+**Source-only or simulated** (host tests, `make test`): the 4-slot engine and 10 effects, controls logic, persistence journal and its erase scheduling, the binary protocol, factory presets, the simulator.
+
+**Companion web app:** works with a real SP-1 over Web Serial (owner report, 2026-11-25; image and controls exercised not recorded).
 
 **Untested:** everything that is new in v1-rc1 (see above), sync with real gear, latency, headphone/speaker switching, iPhone/iPad/Android hosts, Windows (expected not to work).
 

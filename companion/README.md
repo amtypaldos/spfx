@@ -3,7 +3,7 @@
 Static, dependency-free web app (plain HTML/CSS/ES modules, no build step) for the SP-1 FX firmware project. No cloud, no accounts, no analytics, no external requests at runtime.
 
 ## Status, honestly
-- **Not yet tested against a real SP-1.** The firmware side of `docs/PROTOCOL.md` exists (`firmware/protocol/`, in the integrated image since v1-rc1) and is byte-identical to this app on the shared golden frames, but `js/device.js` (Web Serial) has not been run against a device yet.
+- **Works with a real SP-1** (owner report, 2026-11-25, over USB with Web Serial). The firmware side of `docs/PROTOCOL.md` is `firmware/protocol/` (in the integrated image since v1-rc1), byte-identical to this app on the shared golden frames. Not recorded in detail: which firmware image and which controls were exercised.
 - **Browsers:** connecting needs Web Serial, i.e. desktop Chrome or Edge. iPhone and iPad browsers (all WebKit), Safari and Firefox can't connect; they show a notice, and the demo device and preset library still work. Android browsers are untested: the page detects Web Serial and only enables Connect where it exists.
 - Everything else has been checked against the **built-in demo device** (`js/mock-device.js`), a simulation written from the spec. It speaks the real COBS+CRC wire format through the same client code path, but it is not evidence that the firmware behaves the same way.
 - Protocol gaps and assumptions: see `PROTOCOL_NOTES.md` (notably: the STATE message is 383 bytes, over the spec's 250-byte payload limit).
