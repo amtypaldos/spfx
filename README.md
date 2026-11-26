@@ -29,7 +29,7 @@ This is an unofficial hobby project. It is not affiliated with, endorsed by, or 
 
 Quick-reference guide: [PDF](docs/guide/sp1fx-guide.pdf) | [HTML source](docs/guide/sp1fx-guide.html)
 
-Text summary of the controls, for readers who cannot see the image:
+The guide matches firmware 2026.11.25. Text summary of the controls, for readers who cannot see the image:
 
 - **Rocker (FWD/REV), with T1-T4 held:** next or previous effect for that slot. The cycle wraps through None. Holding the rocker repeats.
 - **Faders 1-4:** wet/dry mix of slots 1-4 in performance mode. In edit mode, the same faders set that effect's four parameters.
@@ -37,10 +37,13 @@ Text summary of the controls, for readers who cannot see the image:
 - **FN + T1-T4:** enter edit mode for that slot. **Tap FN again** to return to performance mode.
 - **FN + FWD/REV:** previous or next preset. Holding repeats. The PLAY-side LEDs flash rapidly, then show the position bar.
 - **PLAY tap:** global bypass. A single LED walks across the track LEDs while bypassed.
-- **FN hold 4 s (alone):** power on and power off (integrated firmware rc3). The 8 LEDs fill one per 0.5 s (PLAY-side LEDs, then T1-T4). Pressing any other button during the hold cancels it. Plugging in USB does not switch the unit on; it charges and shows the charge state. (Older images: 1.5 s. The guide image still says 1.5 s; the HTML source is updated.)
-- **VOL- / VOL+:** master volume, 2 dB per press (-60 to 0 dB), shown as a bar on the PLAY-side LEDs. Holding repeats. Saved. (The guide image still says 16 steps; the HTML source is updated.)
+- **FN hold 4 s (alone):** power on and power off. The 8 LEDs fill one per 0.5 s (PLAY-side LEDs, then T1-T4). Pressing any other button during the hold cancels it.
+- **Off with USB plugged in:** the unit does not switch on; it charges and shows a battery gauge of 1-8 LEDs. The top LED pulses while charging and is steady when full.
+- **VOL- / VOL+:** master volume, 2 dB per press (-60 to 0 dB), shown as a bar on the PLAY-side LEDs (LED 1 blinks at mute). Holding repeats. Saved.
 - **Soft takeover:** when a fader changes role, its value does not jump. Its LED blinks while you move it toward the stored value. A bright flash on a dim base means move up. A bright blink with a dark gap means move down. A steady LED means picked up.
-- **LEDs beside PLAY:** output level, or a flashing row when a change is refused (for example, an effect that does not fit the DSP memory or CPU budget).
+- **LEDs beside PLAY:** output level, or a flashing row when a change is refused (for example, an effect that does not fit the DSP memory or CPU budget). In edit mode, one LED pulses slowly to show the slot being edited.
+- **Track LED blinking slowly (1 Hz):** the overload guard switched that slot off to keep the audio running.
+- **Jacks:** headphone jack = audio out, every start at Headphones level; SYNC jack = MIDI clock and Pocket Operator sync out (not audio); USB-C = audio in from a computer or phone, charging, and the companion app. Loud / Line out, sync on/off and tempo are set in the [companion app](https://amtypaldos.github.io/spfx/).
 
 ## How it works
 
