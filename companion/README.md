@@ -8,11 +8,19 @@ Static, dependency-free web app (plain HTML/CSS/ES modules, no build step) for t
 - Protocol gaps and assumptions: see `PROTOCOL_NOTES.md` (notably: the STATE message is 383 bytes, over the spec's 250-byte payload limit).
 
 ## Run
+Two ways, same app:
+
+- **Hosted (GitHub Pages):** open <https://amtypaldos.github.io/spfx/>. It is deployed by `.github/workflows/pages.yml` from each release tag (`v*`), after the tests pass, so it always matches the latest firmware release.
+- **Locally:** use this for unreleased changes, or for a companion that matches an older firmware image (check out that image's tag first). Each release also attaches `sp1fx-companion-<tag>.zip`, which is this folder at that tag.
+
 ```
 cd companion
 python3 -m http.server 8137      # then open http://localhost:8137/
 ```
-Any static server works (a module script and a `fetch` of `data/fx_table.json` are used, so `file://` will not). Desktop Chrome or Edge is needed for **Connect SP-1** (Web Serial). Other browsers (Safari, Firefox, iOS) show a notice; the demo device and the preset manager still work there.
+
+A newer firmware's STATE/METERS format can be rejected by an older companion (and the other way round), so use the companion from the same release as the image on the device.
+
+Locally, any static server works (a module script and a `fetch` of `data/fx_table.json` are used, so `file://` will not). Desktop Chrome or Edge is needed for **Connect SP-1** (Web Serial). Other browsers (Safari, Firefox, iOS) show a notice; the demo device and the preset manager still work there.
 
 ## Tests
 ```

@@ -28,7 +28,8 @@ Project: **SP-1 FX**, custom real-time multi-effects firmware for the Teenage En
 ## Where things are
 - `firmware/dsp/` engine + 10 effects; `firmware/controls/` gestures, soft takeover, LEDs, volume; `firmware/protocol/`, `firmware/storage/`.
 - `firmware/app/zephyr_sp1fx/` is the integrated firmware (current). Older bring-up apps (min, tone, controls, sync, usbaudio, fxprof) stay for isolation tests.
-- `companion/` Web Serial app (serve statically, Chrome only, e.g. `python3 -m http.server 8765 --bind 127.0.0.1` in `companion/`).
+- `companion/` Web Serial app (Chrome only). Hosted on GitHub Pages at https://amtypaldos.github.io/spfx/ (deployed from `v*` tags by
+  `.github/workflows/pages.yml`), or serve it locally, e.g. `python3 -m http.server 8765 --bind 127.0.0.1` in `companion/`.
   A companion must match the firmware's STATE/METERS format (they are released together).
 - `tests/` host C tests (`make test`) and `companion/tests/` (Node 22). `tools/fxprof_emu/` offline cycle estimator (needs unicorn/capstone/pyelftools).
 - `tools/serial_log.py` read-only serial logger (see below). `docs/BRINGUP_SP1FX.md` owner test steps. `docs/research/` research notes.
