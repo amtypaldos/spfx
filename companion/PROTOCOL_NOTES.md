@@ -1,6 +1,8 @@
 # Protocol gaps and assumptions found while implementing the companion
 
-Written against `docs/PROTOCOL.md` (v1). Nothing here has been checked against firmware (none exists yet). Each item says what the companion does, so the firmware author can either match it or change the spec.
+Status: historical record. The firmware side (`firmware/protocol/`) has since been written and `docs/PROTOCOL.md` updated where the two disagreed (for example, the max body is now 512 bytes so STATE fits). `docs/PROTOCOL.md` is the spec; where this file disagrees with it, the spec wins.
+
+Written against `docs/PROTOCOL.md` (v1), before any firmware existed. Each item says what the companion does, so the firmware author can either match it or change the spec.
 
 1. **STATE does not fit the frame limits.** The 0x83 payload is 4+4+4+1+1+1+2+2+2+8 (fixed part, 29 bytes) + 4*11*4*2 (352 bytes of params) + 2 (ui_mode, edit_slot) = **383 bytes** for 11 effects, but the spec caps payload at 250 and body at 256. Companion: the frame receiver accepts bodies up to 1024 bytes (`MAX_BODY_RX`); everything else is still limited to 250/256. Options for the spec: raise the max body for 0x83, or split STATE (e.g. GET_STATE with a slot index), or send only the active effect's params.
 2. **Max body vs max payload are off by one.** Payload 0..250 + 5 bytes (ver, type, seq, crc16) = 255, not 256. Companion enforces payload <= 250.

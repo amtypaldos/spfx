@@ -1,5 +1,9 @@
 # ADR-002: User-experience decisions (user answers, 2026-11-24)
 
+Status: accepted. Where things stand (see `docs/STATUS.md`): Mac and iPhone work as USB audio hosts (owner report); Windows is
+expected not to work (UAC2 patch not applied); returning processed audio to the host exists only in the separate image B, which is
+untested; the companion connects from desktop Chrome/Edge only (iOS cannot connect).
+
 | Question | Decision | Consequence |
 |---|---|---|
 | Host | Both computer and phone/tablet | Must work with USB audio class 2 on macOS/Windows and be tolerant of mobile hosts. Web Serial companion works on desktop Chromium only; iOS needs a separate approach later. |

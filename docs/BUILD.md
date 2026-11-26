@@ -1,7 +1,9 @@
 # Firmware build (Zephyr) — SP-1 FX
 
-Status labels follow AGENTS.md. Everything on this page is **build-only**.
-**Nothing here has been run on an SP-1. The image has not been flashed or tested on hardware.**
+Status labels follow AGENTS.md. This page covers the build environment, first proven with the minimal image.
+That image has since booted on the owner's unit (track LED 1 blinks, 2026-11-24 [HW]; `docs/STATUS.md`, "Hardware
+log"), as have later images built the same way. The build itself was written and checked without hardware; the
+"Guesses about hardware behaviour" below are as written before that first run.
 
 ## What gets built
 
@@ -43,9 +45,10 @@ module commits equal those in zephyr v4.3.1's `west.yml`. This environment follo
 lock-file commits, i.e. **v4.3.1**. Its `SDK_VERSION` file asks for SDK 0.17.4, which matches.
 
 Tape Looper's `patches/zephyr-uac2.patch` (UAC2 Windows feedback backport) is **not** applied:
-it only touches `subsys/usb/device_next/class/*uac2*`, which this image does not build. The
-zephyr checkout is pristine upstream v4.3.1 (the build script refuses a modified checkout).
-Apply it later, recording that, when USB audio is added.
+it only touches `subsys/usb/device_next/class/*uac2*`. The zephyr checkout is pristine upstream
+v4.3.1 (the build script refuses a modified checkout). The USB audio images (`zephyr_usbaudio`,
+`zephyr_sp1fx`) build UAC2 without it, so Windows is expected not to work with them (open owner
+decision; see `docs/BRINGUP_USBAUDIO.md`, "Windows").
 
 SDK archives (`sha256.sum` from the same GitHub release; sdk-ng publishes no signature, so this
 is an integrity check only):
@@ -94,6 +97,12 @@ builds `firmware/app/zephyr_sp1fx` (docs/BRINGUP_SP1FX.md). Its overlay shortens
 `check_image.args` (`--reserve 0xFD000:0xFF000`) is passed to `check_image.py` by the build
 script, which then also fails if any loadable byte lands in the settings pages.
 `repro` directories are now named `repro_<app>_{a,b}`.
+
+**Releases** (from 2026.11.25 on): named by date, `YYYY.MM.DD`, git tag `vYYYY.MM.DD`, firmware string
+`sp1fx-YYYY.MM.DD`. The image is built with `--app sp1fx repro` (two clean builds must be byte-identical) and
+published as a GitHub release with the `.bin`, the `.elf`, the companion zip, `docs/BINARY_NOTICES.md` and
+`SHA256SUMS`. Releases not yet run on hardware are marked as pre-releases. Earlier names were `v1-rc1`..`v1-rc6`.
+From 2026.11.25 on, `-ffile-prefix-map` keeps build-machine paths out of the ELF.
 
 Equivalent manual build:
 
@@ -186,24 +195,25 @@ in `__FILE__`. No timestamps end up in the image.
   USB connected the device may stay dark until FUNCTION is pressed or USB is replugged.
 - Charger (BQ24232 nCE on P0.21) is not touched; the bootloader's pin state is assumed fine.
 
-## FLASHING (NOT DONE)
+## FLASHING (manual, owner only)
 
-> **WARNING.** Nothing in this repository flashes anything, and nothing has been flashed.
-> This image has **never run on an SP-1**. The SP-1 has **no reset pin and no easy power
+> **WARNING.** Nothing in this repository flashes anything. Flashing is a manual step done by
+> the owner (the minimal image was flashed this way on 2026-11-24). The SP-1 has **no reset pin and no easy power
 > cycle**; an app that fails to feed the watchdog boot-loops, and an app without a working
 > path to `SYSTEM_OFF` can only be escaped by the bootloader key combination or by draining
 > the battery. Flashing replaces the current app (for example Tape Looper or the stock
 > firmware) and may affect data an app keeps in the `storage` page. Back up first, and
 > flash only with the owner's explicit approval (AGENTS.md rule).
 
-If the owner decides to try it, it is a **manual step done by the owner**:
+Procedure (as first written for the minimal image; `README.md` "Flashing" has the current one):
 
 1. Use desktop Chrome (WebUSB) and open <https://solderless.engineering>.
 2. Turn the SP-1 off. Hold **T1 + T4** while connecting USB, and release when **T1 lights up**
    (procedure from Tape Looper's README). The device is now in the TE bootloader.
 3. Load `build/firmware/zephyr_min/zephyr/zephyr.bin` only after re-running
    `check_image.py` and confirming the SHA-256 above.
-4. Expected (untested): track LED 1 blinks at 1 Hz; holding FUNCTION 1.5 s turns it off.
+4. Expected: track LED 1 blinks at 1 Hz (observed on 2026-11-24 [HW]); holding FUNCTION 1.5 s turns it off (not
+   recorded for this image).
 
 **Recovery:** re-enter the bootloader (T1 + T4 while connecting USB until T1 lights, or the
 solderless.engineering recovery procedure if that fails) and flash a known-good image (for

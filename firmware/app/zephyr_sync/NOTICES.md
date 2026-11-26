@@ -21,7 +21,8 @@ What was reused, and how it was changed:
 | `firmware/app/zephyr_sync/src/main.c` | Watchdog feed of all 8 RR channels, RESETREAS handling, SYSTEM_OFF sequence (through zephyr_min, which follows Tape Looper's `feed_wdt()` / `power_off()`), the USB CDC ACM / `sample_usbd_init_device` setup pattern (through zephyr_tone) | Written for SP-1 FX; no code copied verbatim. |
 
 Tape Looper's own comments say the MIDI / PO sync output is "untested on real gear". This
-image is untested on hardware as well.
+image ran on the owner's unit (serial log only, no gear); sync with real external gear is not
+separately confirmed.
 
 ## Zephyr RTOS: Apache-2.0
 

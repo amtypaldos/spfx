@@ -6,20 +6,23 @@ This is an unofficial hobby project. It is not affiliated with, endorsed by, or 
 
 ## Status
 
-**Development firmware. Only bring-up images have run on the owner's hardware, and nothing here is production-ready.** The evidence labels follow `docs/STATUS.md`.
+**Development firmware, hobby quality, not production-ready.** The evidence labels follow `docs/STATUS.md`.
 
-**Newest image: `sp1fx-2026.11.25.bin`, the integrated firmware (`firmware/app/zephyr_sp1fx`). Built and host-tested, NOT RUN ON HARDWARE yet.** Releases are named by date from 2026.11.25 on (earlier: `v1-rc1`..`v1-rc6`). rc1 reset by watchdog every few seconds on hardware; rc2 removes the suspected causes and records where a remaining hang happens (`docs/STATUS.md`). It combines USB audio + effects, buttons/faders/LEDs, VOL+/VOL- volume (2 dB steps, saved), the companion protocol on the USB serial port, settings saved to internal flash (0xFD000-0xFEFFF), and the sync jack (off by default, untested with gear). Owner test plan: `docs/BRINGUP_SP1FX.md`.
+**Current release: [`v2026.11.25`](https://github.com/amtypaldos/spfx/releases), the integrated firmware (`firmware/app/zephyr_sp1fx`).** Owner report (2026-11-25): the integrated firmware (latest image) and the companion work decently well, with some minor bugs that are not yet itemised. In the owner's words: "Everything has been tested and it's a little buggy but works decently well." The report came by chat; no console log or itemised results are recorded. Releases are named by date from 2026.11.25 on (`YYYY.MM.DD`, tag `vYYYY.MM.DD`; earlier: `v1-rc1`..`v1-rc6`). The image combines USB audio + effects, buttons/faders/LEDs, VOL+/VOL- volume (2 dB steps, saved), the companion protocol on the USB serial port, settings saved to internal flash (0xFD000-0xFEFFF), a charge standby with a battery gauge, and the sync jack (off by default). Owner test plan: `docs/BRINGUP_SP1FX.md`; history of the release candidates: `docs/STATUS.md`.
 
-**Verified on hardware** (owner-observed, spare unit, 2026-11-24; see `docs/STATUS.md`):
+**Verified on hardware** (owner-observed, spare unit; see `docs/STATUS.md`):
 
-- Minimal heartbeat, tone (codecs, I2S, channel order), controls (all buttons, faders, effect and preset cycling, soft takeover, edit mode, volume steps, power off) and sync (serial log only, no gear) bring-up images.
-- USB audio v3 (`zephyr_usbaudio`, optimised DSP): Mac audio through the engine, the six presets at about 50 % CPU, no crashes (reported by the lead). Ambient tripped the old overload guard on short spikes; the guard is changed in v1-rc1 (untested on hardware).
+- 2026-11-24: minimal heartbeat, tone (codecs, I2S, channel order), controls (all buttons, faders, effect and preset cycling, soft takeover, edit mode, volume steps, power off) and sync (serial log only, no gear) bring-up images.
+- 2026-11-24: USB audio v3 (`zephyr_usbaudio`, optimised DSP): Mac audio through the engine, the six presets at about 50 % CPU, no crashes (reported by the lead).
+- 2026-11-24: integrated firmware rc2, rc3 and rc5 ran on the unit (rc1 reset by watchdog; rc3 fixed the controls; rc5 "everything works", including the charge standby display).
+- 2026-11-25 (owner report): the integrated firmware (latest image, 2026.11.25) and the companion work decently well, some minor bugs.
+- USB audio hosts: Mac and iPhone verified by the owner (`AGENTS.md`; the iPhone date and image are not recorded).
 
 **Source-only or simulated** (host tests, `make test`): the 4-slot engine and 10 effects, controls logic, persistence journal and its erase scheduling, the binary protocol, factory presets, the simulator.
 
-**Companion web app:** works with a real SP-1 over Web Serial (owner report, 2026-11-25; image and controls exercised not recorded).
+**Companion web app:** works with a real SP-1 over Web Serial (owner report, 2026-11-25; browser and OS not recorded). Hosted at <https://amtypaldos.github.io/spfx/>.
 
-**Untested:** everything that is new in v1-rc1 (see above), sync with real gear, latency, headphone/speaker switching, iPhone/iPad/Android hosts, Windows (expected not to work).
+**Not confirmed or not measured:** sync with external gear (the owner reports everything tested; sync with external gear not separately confirmed), image B (USB audio return to the host, a separate bring-up image), latency (not measured), output levels (calculated, not measured), battery % (uncalibrated), declared effect CPU costs (estimates), iPad and Android hosts, Windows (expected not to work).
 
 **Known issues / limits:** replacing an effect cuts the old tail; saturation and bitcrusher alias at high settings; soft-takeover thresholds are guesses; only 8 monochrome LEDs; the Mac cannot control the volume over USB (use VOL+/VOL-); Windows is not supported (explicit-feedback UAC2 without Tape Looper's Windows patch).
 
@@ -46,7 +49,7 @@ Text summary of the controls, for readers who cannot see the image:
 
 - **Input:** the SP-1 is a USB device. A Mac or phone sends stereo audio over USB Audio Class 2 (UAC2) at 48 kHz, 16-bit. The SP-1 has no analog audio input: its codec has no data path back to the MCU, and the MCU has no I2S data-in pin (`docs/PHASE0_REPORT.md`, source findings).
 - **Processing:** the nRF52840 (Cortex-M4F, 64 MHz) runs a 4-slot serial effect chain in 64-frame blocks. The engine has a 150 KiB effect memory pool and rejects configurations that do not fit the memory or CPU budget.
-- **Output:** processed audio goes out over I2S to the headphone codec (CS42L42) or the speaker amplifier (TAS2505). Image B also returns the processed audio to the host as a second USB input device.
+- **Output:** processed audio goes out over I2S to the headphone codec (CS42L42) or the speaker amplifier (TAS2505). A separate bring-up image (image B, `zephyr_usbaudio_io`, untested) also returns the processed audio to the host as a USB input device; the integrated firmware does not.
 - **Sync:** the second 3.5 mm jack is a digital **output** only: MIDI clock and Start/Stop on the ring, Pocket Operator sync pulses on the tip. It does not carry audio (`docs/ADR-001-audio-routing.md`).
 - **Control:** a companion web app talks to the device over the USB serial port with the Web Serial API. It is used for presets, tempo and sync settings, and to view status. The protocol is specified in `docs/PROTOCOL.md`. The companion is a static page with no dependencies. Use the hosted copy at <https://amtypaldos.github.io/spfx/> or run it locally (`companion/README.md`).
 
@@ -93,7 +96,7 @@ build/sp1fx_sim in.wav out.wav --slot 1=filter --param 1.1=800 --slot 2=delay --
 
 Companion app (desktop Chrome or Edge for Web Serial). Either:
 
-- **Hosted:** open <https://amtypaldos.github.io/spfx/>. GitHub Pages publishes it from the latest release tag, so it matches the latest firmware release.
+- **Hosted:** open <https://amtypaldos.github.io/spfx/>. GitHub Pages publishes it from release tags (`v*`, or a manual run of `.github/workflows/pages.yml`), so it matches the latest firmware release.
 - **Locally:** serve `companion/` with any static server (needed for unreleased changes, or to use a companion that matches an older image: check out that image's tag first):
 
 ```sh
@@ -125,39 +128,39 @@ The controls and sync images have their own scripts, `firmware/scripts/build_con
 
 - **Nothing in this repository flashes anything, and the firmware is never flashed automatically.** Flashing is a manual step that the owner does.
 - Flashing replaces the current app. Check the image name and SHA-256 before you flash.
-- Never write to the bootloader (0x00000-0x1FFFF), the Bluetooth module, eMMC, or the storage page (0xFF000). The images are linked to the app slot at 0x20000 and `check_image.py` enforces that. Do not erase storage. The integrated firmware (`sp1fx-v1-rc1.bin`) itself writes only its two settings pages 0xFD000-0xFEFFF, inside the app slot and outside its image (`check_image.py --reserve`, `docs/ADR-003-storage.md`).
+- Never write to the bootloader (0x00000-0x1FFFF), the Bluetooth module, eMMC, or the storage page (0xFF000). The images are linked to the app slot at 0x20000 and `check_image.py` enforces that. Do not erase storage. The integrated firmware (`sp1fx-*.bin`, from v1-rc1 on) itself writes only its two settings pages 0xFD000-0xFEFFF, inside the app slot and outside its image (`check_image.py --reserve`, `docs/ADR-003-storage.md`).
 - The SP-1 has no reset pin. An app that does not feed the watchdog (every 5 s) boot-loops until the bootloader is re-entered. An app that cannot reach SYSTEM_OFF can only be recovered through the bootloader key combination.
-- **Keep a recovery image ready.** The Tape Looper release image (`RECOVERY-tape-looper-from-repo.bin`, SHA-256 `e73e3786...badbf`) is the known-good fallback. The tone and minimal heartbeat images have also booted on the owner's unit.
+- **Keep a recovery image ready.** Tape Looper's own release image, downloaded from Tape Looper's GitHub releases (the owner's copy is `RECOVERY-tape-looper-from-repo.bin`, SHA-256 `e73e3786...badbf`), is the known-good fallback. It is not redistributed here. The tone and minimal heartbeat images have also booted on the owner's unit.
 - Start with the computer volume low and the headphones off your ears. USB audio images have a fade-in and a digital trim, but the analog gains are not yet measured.
 
 Procedure:
 
 1. Open desktop Chrome (WebUSB) at <https://solderless.engineering>.
 2. Turn the SP-1 off. Hold **T1 + T4** while you connect USB, and release when **T1 lights**. The device is now in the TE bootloader.
-3. Check the image against the staged checksums, then flash it from the Solderless page.
+3. Check the image against its `SHA256SUMS`, then flash it from the Solderless page.
 4. To recover from a bad image, repeat step 2 and flash a known-good image.
 
-Staged images are kept outside the repository, in `flash-ready/`. They are not in git. The build scripts produce them (copies from `build/firmware/...` with SHA-256 checked). Verify with `shasum -a 256 -c SHA256SUMS` in that folder.
+**Where to get images.** Flash images are not in git. Released images are on the [GitHub releases page](https://github.com/amtypaldos/spfx/releases): each release has the `.bin`, the `.elf` (for `addr2line`), the matching companion zip, `BINARY_NOTICES.md` and `SHA256SUMS`. Download them into one folder and run `shasum -a 256 -c SHA256SUMS` there. Releases not yet run on hardware are marked as pre-releases. Published so far: `v1-rc6` and `v2026.11.25`. All other images in the table below are local builds: rebuild them from source (see "Build and test"). The owner's workflow stages images in a local `flash-ready/` folder outside the repository (copies from `build/firmware/...` with SHA-256 checked, verified the same way).
 
 | Image | Purpose |
 |---|---|
 | `sp1fx-min-heartbeat.bin` | Minimal heartbeat and power-off image. Boots and blinks LED 1. |
 | `sp1fx-tone.bin` | Audio bring-up: quiet test tone (left low, right high). Confirmed on the owner's unit. |
 | `sp1fx-controls.bin` | Buttons, faders, LEDs, effect and preset cycling, with the engine in the loop. Confirmed on the owner's unit. |
-| `sp1fx-sync.bin` | MIDI clock and PO sync output. Serial log confirmed. Real gear pending. |
+| `sp1fx-sync.bin` | MIDI clock and PO sync output. Serial log confirmed. Real gear not separately confirmed. |
 | `sp1fx-usbaudio-in.bin` (v1) | USB audio in, A. Crashes on the first preset change. Superseded. |
-| `sp1fx-usbaudio-in-v2.bin` | USB audio in, A, v2 (crash mitigations and crash dump). Not flashed yet. |
+| `sp1fx-usbaudio-in-v2.bin` | USB audio in, A, v2 (crash mitigations and crash dump). Ran on the owner's unit: no crash, but every effect preset overloaded (170-200 % CPU). Superseded by v3. |
 | `sp1fx-usbaudio-io.bin` (v1) | USB audio in and return to host, B. Not run on hardware. Superseded. |
-| `sp1fx-usbaudio-io-v2.bin` | USB audio in and return to host, B, v2. Not flashed yet. |
+| `sp1fx-usbaudio-io-v2.bin` | USB audio in and return to host, B, v2. Not run on hardware (no result reported). |
 | `sp1fx-usbaudio-in-v3.bin` | USB audio in, A, v3 (optimised DSP, overload guard). Runs on the owner's unit (presets ~50 % CPU). |
 | `sp1fx-v1-rc1.bin` | Integrated firmware rc1. **Resets by watchdog on hardware.** Superseded. |
 | `sp1fx-v1-rc2.bin` | Integrated firmware rc2 (reset fixes + stall recorder). Ran on the owner's unit; FN-hold power off too easy to hit. Superseded. |
 | `sp1fx-v1-rc3.bin` | Integrated firmware rc3: controls fix, 4 s power on/off, charge standby. Ran on the owner's unit; control-loop starvation near-misses under heavy load. Superseded. |
 | `sp1fx-v1-rc4.bin` | Integrated firmware rc4. Superseded by rc5 (not run). |
 | `sp1fx-v1-rc5.bin` | Integrated firmware rc5 (three jack levels, feedback saturation). Worked on the owner's unit. Superseded by rc6. |
-| `sp1fx-v1-rc6.bin` | **Integrated firmware rc6** = rc5 + battery fuel gauge in the charge standby (off + USB), battery % in console/companion, no charging LED while on. Not run on hardware yet. Test plan: `docs/BRINGUP_SP1FX.md`. Needs the companion from the same commit. Superseded by 2026.11.25. |
-| `sp1fx-2026.11.25.bin` | **Integrated firmware 2026.11.25** = rc6 + feature list for the companion (it grays out what the firmware lacks), date-based version, no build paths in the ELF. Not run on hardware yet. Works with this and later companions. |
-| `RECOVERY-tape-looper-from-repo.bin` | Tape Looper release, recovery only. Not built from this repository. |
+| `sp1fx-v1-rc6.bin` | Integrated firmware rc6 = rc5 + battery fuel gauge in the charge standby (off + USB), battery % in console/companion, no charging LED while on. GitHub release `v1-rc6`. No hardware result reported for rc6 itself. Needs the companion from the same commit or later. Superseded by 2026.11.25. |
+| `sp1fx-2026.11.25.bin` | **Integrated firmware 2026.11.25 (current release)** = rc6 + feature list for the companion (it grays out what the firmware lacks), date-based version, no build paths in the ELF. GitHub release `v2026.11.25`. Owner report: works decently well, some minor bugs not yet itemised. Works with this and later companions. Test plan: `docs/BRINGUP_SP1FX.md`. |
+| `RECOVERY-tape-looper-from-repo.bin` | Tape Looper release (from Tape Looper's GitHub releases), recovery only. Not built from or redistributed by this repository. |
 
 Bring-up procedures and pass/fail checklists are in `docs/BRINGUP_SP1FX.md` (integrated firmware), `docs/BRINGUP_TONE.md`, `docs/BRINGUP_CONTROLS.md`, `docs/BRINGUP_SYNC.md` and `docs/BRINGUP_USBAUDIO.md`.
 
