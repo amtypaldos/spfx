@@ -5,6 +5,34 @@ That image has since booted on the owner's unit (track LED 1 blinks, 2026-11-24 
 log"), as have later images built the same way. The build itself was written and checked without hardware; the
 "Guesses about hardware behaviour" below are as written before that first run.
 
+## Repository layout
+
+```
+AGENTS.md              rules for contributors and agents
+Makefile               host build: DSP library, simulator, C tests (make, make test)
+firmware/
+  dsp/                 effects and the 4-slot engine (plain C99, no Zephyr headers)
+  controls/            debounce, gestures, soft takeover, controller, LED renderer
+  audio/               USB audio core (ring, feedback) and FX profiling core
+  protocol/            binary protocol, device side
+  storage/             versioned config record and power-loss-safe journal
+  drivers/             ladder/fader, LEDs, sync, MIDI out, crash dump (Zephyr side)
+  app/                 Zephyr apps: zephyr_sp1fx (integrated firmware), zephyr_min,
+                       zephyr_tone, zephyr_controls, zephyr_sync, zephyr_usbaudio,
+                       zephyr_usbaudio_io, zephyr_fxprof; app_logic.c (host-tested
+                       save/console decisions)
+  boards/              SP-1 board definition (from Tape Looper, MIT) and licences
+  scripts/             build_firmware.sh, build_controls.sh, build_sync.sh, check_image.py
+  west.yml, west-lock.json   pinned Zephyr and module versions
+companion/             Web Serial companion app and its Node tests
+presets/               factory preset JSON and the generator for factory_presets.h
+simulator/             WAV in, WAV out through the real engine (build/sp1fx_sim)
+tests/                 C test suites (test_*.c) and golden-frame generator
+tools/fxprof_emu/      host emulator for effect cost profiling
+docs/                  status, build, protocol, ADRs, bring-up notes, guide
+build/                 generated (git-ignored)
+```
+
 ## What gets built
 
 `firmware/app/zephyr_min` is a minimal app-only image whose only job is to prove the
@@ -205,7 +233,7 @@ in `__FILE__`. No timestamps end up in the image.
 > firmware) and may affect data an app keeps in the `storage` page. Back up first, and
 > flash only with the owner's explicit approval (AGENTS.md rule).
 
-Procedure (as first written for the minimal image; `README.md` "Flashing" has the current one):
+Procedure (as first written for the minimal image; `docs/IMAGES.md` has the current one):
 
 1. Use desktop Chrome (WebUSB) and open <https://solderless.engineering>.
 2. Turn the SP-1 off. Hold **T1 + T4** while connecting USB, and release when **T1 lights up**
